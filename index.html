@@ -150,7 +150,7 @@ body.dark .boost-value { color: #9a9aa6; }
 	flex-wrap: wrap;
 }
 
-#screenshotInput { position: absolute; width: 0; height: 0; opacity: 0; overflow: hidden; }
+#screenshotInput { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 
 .scan-button,
 button.scan-secondary {
@@ -454,8 +454,10 @@ body.dark .header { color: #5a5a66; }
 				<div class="scan-status" id="scanStatus">No screenshot selected.</div>
 			</div>
 			<div class="scan-actions">
-				<button type="button" class="scan-button" onclick="document.getElementById('screenshotInput').click()">Choose Screenshot</button>
-				<input id="screenshotInput" type="file" accept="image/*">
+				<div style="position:relative;display:inline-flex;">
+					<button type="button" class="scan-button">Choose Screenshot</button>
+					<input id="screenshotInput" type="file" accept="image/*">
+				</div>
 				<button type="button" class="scan-secondary" id="scanAgainBtn" onclick="scanAgain()" disabled>Scan Again</button>
 			</div>
 		</div>
