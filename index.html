@@ -1,0 +1,1649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Food Exp Calculator</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+	font-family: 'Segoe UI', Tahoma, sans-serif;
+	min-height: 100vh;
+	padding: 20px;
+}
+
+body.light {
+	background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+	color: #fff;
+}
+
+body.dark {
+	background: #0a0a0f;
+	background-image:
+		radial-gradient(circle at 20% 10%, rgba(255,165,0,0.06) 0%, transparent 40%),
+		radial-gradient(circle at 80% 90%, rgba(255,215,0,0.05) 0%, transparent 40%);
+	color: #e4e4e7;
+}
+
+.container {
+	max-width: 600px;
+	margin: 0 auto;
+	border-radius: 20px;
+	padding: 30px;
+	position: relative;
+}
+
+body.light .container {
+	background: rgba(255,255,255,0.08);
+	backdrop-filter: blur(10px);
+	box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+	border: 1px solid rgba(255,255,255,0.18);
+}
+
+body.dark .container {
+	background: #16161f;
+	box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+	border: 1px solid #2a2a35;
+}
+
+.toggle {
+	position: absolute;
+	top: 20px;
+	right: 20px;
+	width: 42px;
+	height: 42px;
+	border-radius: 50%;
+	border: none;
+	cursor: pointer;
+	font-size: 20px;
+	padding: 0;
+}
+
+body.light .toggle {
+	background: rgba(255,255,255,0.15);
+	color: #fff;
+}
+
+body.dark .toggle {
+	background: #1c1c26;
+	color: #ffd700;
+	border: 1px solid #2a2a35;
+}
+
+.toggle:hover { transform: scale(1.08); }
+
+h1 {
+	text-align: center;
+	margin-bottom: 8px;
+	font-size: 28px;
+	background: linear-gradient(90deg, #ffd700, #ffa500);
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	background-clip: text;
+}
+
+.subtitle {
+	text-align: center;
+	margin-bottom: 25px;
+	font-size: 14px;
+}
+
+body.light .subtitle { color: rgba(255,255,255,0.7); }
+body.dark .subtitle { color: #8a8a99; }
+
+[hidden] { display: none !important; }
+
+.panel {
+	margin-bottom: 20px;
+	padding: 16px;
+	border-radius: 12px;
+}
+
+body.light .panel {
+	background: rgba(255,255,255,0.05);
+	border: 1px solid rgba(255,255,255,0.16);
+}
+
+body.dark .panel {
+	background: #1c1c26;
+	border: 1px solid #25252f;
+}
+
+.scan-panel { border-style: dashed; }
+.scan-panel.dragging {
+	border-color: #ffd700;
+	box-shadow: 0 0 0 2px rgba(255,215,0,0.18);
+}
+
+.scan-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.scan-title,
+.boost-title {
+	font-weight: 700;
+	font-size: 15px;
+	margin-bottom: 5px;
+}
+
+.scan-status,
+.boost-value {
+	font-size: 13px;
+	min-height: 18px;
+}
+
+body.light .scan-status,
+body.light .boost-value { color: rgba(255,255,255,0.72); }
+body.dark .scan-status,
+body.dark .boost-value { color: #9a9aa6; }
+
+.scan-status.busy { color: #ffd700; }
+
+.scan-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+#screenshotInput { position: absolute; width: 0; height: 0; opacity: 0; overflow: hidden; }
+
+.scan-button,
+button.scan-secondary {
+	border: none;
+	border-radius: 8px;
+	padding: 10px 12px;
+	font-size: 13px;
+	font-weight: 700;
+	cursor: pointer;
+	color: #fff;
+}
+
+.scan-button { display: inline-flex; align-items: center; }
+
+button.scan-secondary:disabled { cursor: not-allowed; opacity: 0.5; }
+
+body.light .scan-button,
+body.light button.scan-secondary { background: linear-gradient(135deg, #4facfe, #00c2ff); }
+
+body.dark .scan-button,
+body.dark button.scan-secondary { background: linear-gradient(135deg, #2563eb, #1e40af); }
+
+.scan-preview {
+	display: grid;
+	grid-template-columns: 150px 1fr;
+	gap: 14px;
+	margin-top: 14px;
+	align-items: start;
+}
+
+.scan-preview img {
+	width: 100%;
+	max-height: 150px;
+	object-fit: contain;
+	border-radius: 8px;
+	background: rgba(0,0,0,0.25);
+}
+
+.detected {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 7px;
+	min-height: 28px;
+}
+
+.detected span {
+	border-radius: 999px;
+	padding: 6px 9px;
+	font-size: 12px;
+	font-weight: 700;
+}
+
+body.light .detected span { background: rgba(255,255,255,0.12); color: #fff; }
+body.dark .detected span {
+	background: #0e0e14;
+	color: #e4e4e7;
+	border: 1px solid #2f2f3a;
+}
+
+.ocr-details { margin-top: 10px; font-size: 12px; }
+.ocr-details summary { cursor: pointer; color: #ffd700; margin-bottom: 8px; }
+
+.ocr-details textarea {
+	width: 100%;
+	min-height: 90px;
+	resize: vertical;
+	border-radius: 8px;
+	padding: 10px;
+	font-family: Consolas, monospace;
+	font-size: 12px;
+	line-height: 1.35;
+	outline: none;
+}
+
+body.light .ocr-details textarea {
+	border: 1px solid rgba(255,255,255,0.2);
+	background: rgba(0,0,0,0.28);
+	color: #fff;
+}
+
+body.dark .ocr-details textarea {
+	border: 1px solid #2f2f3a;
+	background: #0e0e14;
+	color: #f0f0f5;
+}
+
+.boost-panel {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	padding: 14px 16px;
+}
+
+.boost-select-wrap {
+	display: grid;
+	gap: 5px;
+	min-width: 170px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+}
+
+body.light .boost-select-wrap { color: rgba(255,255,255,0.58); }
+body.dark .boost-select-wrap { color: #7a7a85; }
+
+.boost-select-wrap select {
+	width: 100%;
+	padding: 9px 10px;
+	border-radius: 8px;
+	font-size: 14px;
+	font-weight: 700;
+	outline: none;
+}
+
+body.light .boost-select-wrap select {
+	border: 1px solid rgba(255,255,255,0.2);
+	background: rgba(0,0,0,0.3);
+	color: #fff;
+}
+
+body.dark .boost-select-wrap select {
+	border: 1px solid #2f2f3a;
+	background: #0e0e14;
+	color: #f0f0f5;
+}
+
+.boost-select-wrap select:focus {
+	border-color: #ffd700;
+	box-shadow: 0 0 0 2px rgba(255,215,0,0.2);
+}
+
+.row {
+	display: grid;
+	grid-template-columns: 40px 1fr 80px 110px 100px;
+	align-items: center;
+	gap: 10px;
+	padding: 12px;
+	margin-bottom: 8px;
+	border-radius: 10px;
+}
+
+body.light .row { background: rgba(255,255,255,0.05); }
+body.light .row:hover { background: rgba(255,255,255,0.12); }
+
+body.dark .row { background: #1c1c26; border: 1px solid #25252f; }
+body.dark .row:hover { background: #21212d; border-color: #353542; }
+
+.icon { font-size: 26px; text-align: center; }
+.name { font-weight: 600; font-size: 15px; }
+body.dark .name { color: #f0f0f5; }
+.exp { color: #ffd700; font-size: 13px; text-align: right; }
+
+input[type=number] {
+	width: 100%;
+	padding: 8px 10px;
+	border-radius: 6px;
+	font-size: 15px;
+	text-align: center;
+	outline: none;
+}
+
+body.light input[type=number] {
+	border: 1px solid rgba(255,255,255,0.2);
+	background: rgba(0,0,0,0.3);
+	color: #fff;
+}
+
+body.dark input[type=number] {
+	border: 1px solid #2f2f3a;
+	background: #0e0e14;
+	color: #f0f0f5;
+}
+
+input[type=number]:focus {
+	border-color: #ffd700;
+	box-shadow: 0 0 0 2px rgba(255,215,0,0.2);
+}
+
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.sub { text-align: right; font-weight: 600; font-size: 14px; }
+body.light .sub { color: #8fffaf; }
+body.dark .sub { color: #6ee7a0; }
+
+.buttons { display: flex; gap: 10px; margin-top: 20px; }
+
+button.action {
+	flex: 1;
+	padding: 12px;
+	border: none;
+	border-radius: 10px;
+	font-size: 15px;
+	font-weight: 600;
+	cursor: pointer;
+	color: #fff;
+}
+
+button.action:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+
+body.light .reset { background: linear-gradient(135deg, #ff6b6b, #ee5a52); }
+body.light .copy  { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+body.dark .reset  { background: linear-gradient(135deg, #b53a3a, #8a2a2a); }
+body.dark .copy   { background: linear-gradient(135deg, #2563eb, #1e40af); }
+
+.total {
+	margin-top: 25px;
+	padding: 25px;
+	border-radius: 15px;
+	text-align: center;
+}
+
+body.light .total {
+	background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,165,0,0.15));
+	border: 2px solid rgba(255,215,0,0.4);
+}
+
+body.dark .total {
+	background: linear-gradient(135deg, #1a1612, #1f1a14);
+	border: 2px solid rgba(255,215,0,0.35);
+	box-shadow: inset 0 0 30px rgba(255,215,0,0.05);
+}
+
+.total-label {
+	font-size: 14px;
+	text-transform: uppercase;
+	letter-spacing: 2px;
+	margin-bottom: 8px;
+}
+
+body.light .total-label { color: rgba(255,255,255,0.8); }
+body.dark .total-label { color: #a8a8b3; }
+
+.total-value {
+	font-size: 42px;
+	font-weight: 800;
+	color: #ffd700;
+	text-shadow: 0 2px 12px rgba(255,215,0,0.35);
+}
+
+.total-items { margin-top: 8px; font-size: 13px; }
+body.light .total-items { color: rgba(255,255,255,0.6); }
+body.dark .total-items { color: #7a7a85; }
+
+.header {
+	display: grid;
+	grid-template-columns: 40px 1fr 80px 110px 100px;
+	gap: 10px;
+	padding: 0 12px 8px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+}
+
+body.light .header { color: rgba(255,255,255,0.5); }
+body.dark .header { color: #5a5a66; }
+
+.header div:nth-child(3) { text-align: right; }
+.header div:nth-child(4) { text-align: center; }
+.header div:nth-child(5) { text-align: right; }
+
+@media (max-width: 560px) {
+	.container { padding: 24px 16px; }
+	.toggle { top: 16px; right: 16px; width: 44px; height: 44px; }
+	.row,
+	.header {
+		grid-template-columns: 32px minmax(64px,1fr) 54px 68px 62px;
+		gap: 6px;
+		padding-left: 6px;
+		padding-right: 6px;
+	}
+	.name,
+	.exp,
+	.sub,
+	input[type=number] { font-size: 12px; }
+	input[type=number] { padding: 10px 4px; min-height: 44px; }
+	.scan-button,
+	button.scan-secondary,
+	button.action { min-height: 44px; padding: 12px; }
+	.boost-select-wrap select { min-height: 44px; }
+	.scan-preview { grid-template-columns: 1fr; }
+	.boost-panel { align-items: stretch; flex-direction: column; }
+	.boost-select-wrap { min-width: 0; }
+	.buttons { flex-direction: column; }
+}
+</style>
+<script type='text/javascript' src='https://www.genspark.ai/LMr8xTs2lKkdoUi3w-VgkbGx_pFY1pjyaplS_bZVBOC_YFHR_TTgSeowb2xoXLThsQBKGXQPxY7WE5Tqe8YQsNNM5PZdqrNFOs0FhizQRFvT9pvfdrwEErZMMhWCXidLhbZ-j26bwfyx7Vc3pErbd5inFUN0q0xnmYz-Uoz9OS2KmF-GEbRIFyNbIOebLNuAx9SyHfx-6wANTPXoIP1YmEBYJVP_0kwIO64bsIhi2g8rdJIwb6QQWifKIv3BaSX90eR9iN1n737IAdPLIKJtBYBimakxNudYGg--9iIIL1WDI-O3zuJtG-MOCkCUz9U7vmwhbR2oLs6HRKyitKvkwXYmSyLpmS8QKTosPDV6Zp-z-1QqWB1Vtu-tMDORJH8pRHdV-u5eR5q-uFd6KYm8NgLYlTWy0uaNu1SJzSriKSYDTbdBF8vAF4MIQYWEL8WY4vn2icBvhG5sxSlghIZzyxMN9rx0mhxBiR3FyRm88ug_lSBYklrJeoJOGDJobOyRLikbD032R0nhY0WARwgTTxcOo1Npp1EG7uYazbR2PUhgRQf4MwvdROQve3z0lB7CwzoNKKc-f-s57wTyHot60XxK9-R63ZN4M8R9AmMEaNKVtZxoegFG2zxrb_-p3FEU4EHLfr2G0jjAYBk3CZDA9IUDFTIs6upF8PR3ZG-wz6ueBc7mkWOPvtBaWPDKFh5V2Gm56XAM7DiJYcoxzOYfEM5uGuR3'></script></head>
+<body class="dark">
+
+<div class="container">
+	<button class="toggle" onclick="toggleTheme()" id="themeBtn" title="Switch theme">&#9728;</button>
+
+	<h1>Food Exp Calculator</h1>
+	<p class="subtitle">Enter how many of each food you have to calculate total EXP</p>
+
+	<div class="panel scan-panel" id="scanPanel">
+		<div class="scan-top">
+			<div>
+				<div class="scan-title">Screenshot Autofill</div>
+				<div class="scan-status" id="scanStatus">No screenshot selected.</div>
+			</div>
+			<div class="scan-actions">
+				<button type="button" class="scan-button" onclick="document.getElementById('screenshotInput').click()">Choose Screenshot</button>
+				<input id="screenshotInput" type="file" accept="image/*">
+				<button type="button" class="scan-secondary" id="scanAgainBtn" onclick="scanAgain()" disabled>Scan Again</button>
+			</div>
+		</div>
+		<div class="scan-preview" id="scanPreview" hidden>
+			<img id="scanImagePreview" alt="Screenshot preview">
+			<div>
+				<div class="detected" id="detectedList"></div>
+				<details class="ocr-details" id="ocrDetails" hidden>
+					<summary>Detected Text</summary>
+					<textarea id="ocrText" readonly></textarea>
+				</details>
+			</div>
+		</div>
+	</div>
+
+	<div class="panel boost-panel">
+		<div>
+			<div class="boost-title">Admin Abuse Feeding XP</div>
+			<div class="boost-value" id="boostValue">Normal food values</div>
+		</div>
+		<label class="boost-select-wrap">
+			<span>Multiplier</span>
+			<select id="foodMultiplier" onchange="setFoodMultiplier(this.value)"></select>
+		</label>
+	</div>
+
+	<div class="header">
+		<div></div>
+		<div>Food</div>
+		<div>EXP/each</div>
+		<div>Quantity</div>
+		<div>Subtotal</div>
+	</div>
+
+	<div id="list"></div>
+
+	<div class="buttons">
+		<button class="action reset" onclick="resetAll()">Reset</button>
+		<button class="action copy" onclick="copyResult(event)">Copy Result</button>
+	</div>
+
+	<div class="total">
+		<div class="total-label">Total EXP</div>
+		<div class="total-value" id="totalExp">0</div>
+		<div class="total-items" id="totalItems">0 items</div>
+	</div>
+</div>
+
+<script>
+var foods = [
+	{ name: 'Cheese',    exp: 75,  icon: '\uD83E\uDDC0', aliases: ['cheese', 'cheeze', 'chese', 'cheeso'] },
+	{ name: 'Egg',       exp: 100, icon: '\uD83E\uDD5A', aliases: ['eggs', 'egg', 'eqg', 'eyg'] },
+	{ name: 'Fries',     exp: 125, icon: '\uD83C\uDF5F', aliases: ['french fries', 'fries', 'fry', 'fnes', 'fnies'] },
+	{ name: 'Taco',      exp: 150, icon: '\uD83C\uDF2E', aliases: ['tacos', 'taco', 'tac0', 'tac'] },
+	{ name: 'Hotdog',    exp: 175, icon: '\uD83C\uDF2D', aliases: ['hot dog', 'hotdog', 'hotdeg', 'hot deg', 'hotd0g'] },
+	{ name: 'Burger',    exp: 200, icon: '\uD83C\uDF54', aliases: ['hamburger', 'burger', 'burge', 'burgr'] },
+	{ name: 'Pizza',     exp: 225, icon: '\uD83C\uDF55', aliases: ['pizza', 'pizz', 'piza'] },
+	{ name: 'Chicken',   exp: 250, icon: '\uD83C\uDF57', aliases: ['chicken', 'chicke', 'chcken', 'chiken'] },
+	{ name: 'Drumstick', exp: 275, icon: '\uD83C\uDF56', aliases: ['drum stick', 'drumstick', 'drumsick', 'drumstck', 'drumstik'] }
+];
+
+// Labels that should consume their tile's quantity without contributing to EXP
+var blockedFoods = [
+	{ name: '__lightning_fruit__', aliases: ['lightning fruit', 'lightningfruit', 'lightning fruit', 'ltng fruit', 'light fruit', 'lightnng', 'lighining fruit', 'lightring fruit'] }
+];
+
+var multipliers = [1, 2, 4, 6, 8, 10, 16, 24, 32, 64, 128];
+var currentMultiplier = 1;
+
+var rows = [];
+var list = document.getElementById('list');
+var scanPanel = document.getElementById('scanPanel');
+var screenshotInput = document.getElementById('screenshotInput');
+var scanStatus = document.getElementById('scanStatus');
+var scanPreview = document.getElementById('scanPreview');
+var scanImagePreview = document.getElementById('scanImagePreview');
+var scanAgainBtn = document.getElementById('scanAgainBtn');
+var detectedList = document.getElementById('detectedList');
+var ocrDetails = document.getElementById('ocrDetails');
+var ocrText = document.getElementById('ocrText');
+var totalExpEl = document.getElementById('totalExp');
+var totalItemsEl = document.getElementById('totalItems');
+var boostValue = document.getElementById('boostValue');
+var multiplierSelect = document.getElementById('foodMultiplier');
+var themeBtn = document.getElementById('themeBtn');
+
+var activeFile = null;
+var activeBlob = null;
+var activeScale = 1;
+var previewUrl = '';
+var ocrLoadPromise = null;
+var ocrRunId = 0;
+var dragDepth = 0;
+
+for (var f = 0; f < foods.length; f++) {
+	var food = foods[f];
+	var parts = [];
+	for (var a = 0; a < food.aliases.length; a++) {
+		var phrase = normalizePhrase(food.aliases[a]);
+		parts.push({ phrase: phrase, words: phrase.split(' '), compact: phrase.replace(/\s/g, '') });
+	}
+	food.aliasParts = parts;
+}
+
+for (var f = 0; f < blockedFoods.length; f++) {
+	var bfood = blockedFoods[f];
+	var bparts = [];
+	for (var a = 0; a < bfood.aliases.length; a++) {
+		var phrase = normalizePhrase(bfood.aliases[a]);
+		bparts.push({ phrase: phrase, words: phrase.split(' '), compact: phrase.replace(/\s/g, '') });
+	}
+	bfood.aliasParts = bparts;
+}
+
+for (var i = 0; i < foods.length; i++) {
+	var row = document.createElement('div');
+	row.className = 'row';
+	row.innerHTML =
+		'<div class="icon">' + foods[i].icon + '</div>' +
+		'<div class="name">' + foods[i].name + '</div>' +
+		'<div class="exp"></div>' +
+		'<div><input type="number" min="0" value="0"></div>' +
+		'<div class="sub">0</div>';
+	list.appendChild(row);
+
+	var input = row.querySelector('input');
+	input.addEventListener('input', update);
+	input.addEventListener('focus', function() { this.select(); });
+
+	rows.push({
+		input: input,
+		expEl: row.querySelector('.exp'),
+		subEl: row.querySelector('.sub')
+	});
+}
+
+for (var m = 0; m < multipliers.length; m++) {
+	var opt = document.createElement('option');
+	opt.value = multipliers[m];
+	opt.textContent = multipliers[m] === 1 ? 'x1 Normal' : 'x' + multipliers[m];
+	multiplierSelect.appendChild(opt);
+}
+
+screenshotInput.addEventListener('change', function() {
+	if (this.files && this.files[0]) readScreenshot(this.files[0]);
+});
+
+scanPanel.addEventListener('dragenter', function(e) {
+	e.preventDefault();
+	dragDepth++;
+	scanPanel.classList.add('dragging');
+});
+
+scanPanel.addEventListener('dragover', function(e) { e.preventDefault(); });
+
+scanPanel.addEventListener('dragleave', function() {
+	dragDepth--;
+	if (dragDepth <= 0) {
+		dragDepth = 0;
+		scanPanel.classList.remove('dragging');
+	}
+});
+
+scanPanel.addEventListener('drop', function(e) {
+	e.preventDefault();
+	dragDepth = 0;
+	scanPanel.classList.remove('dragging');
+	if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+		readScreenshot(e.dataTransfer.files[0]);
+	}
+});
+
+document.addEventListener('paste', function(e) {
+	if (!e.clipboardData || !e.clipboardData.items) return;
+	var items = e.clipboardData.items;
+	for (var p = 0; p < items.length; p++) {
+		if (items[p].type && items[p].type.indexOf('image/') === 0) {
+			var file = items[p].getAsFile();
+			if (file) {
+				readScreenshot(file);
+				e.preventDefault();
+				return;
+			}
+		}
+	}
+});
+
+function update() {
+	var total = 0;
+	var count = 0;
+	for (var i = 0; i < rows.length; i++) {
+		var qty = parseInt(rows[i].input.value) || 0;
+		if (qty < 0) qty = 0;
+		var each = Math.round(foods[i].exp * currentMultiplier);
+		rows[i].expEl.textContent = each.toLocaleString();
+		var s = qty * each;
+		rows[i].subEl.textContent = s.toLocaleString();
+		total += s;
+		count += qty;
+	}
+	totalExpEl.textContent = total.toLocaleString();
+	totalItemsEl.textContent = count.toLocaleString() + ' item' + (count === 1 ? '' : 's');
+	boostValue.textContent = currentMultiplier === 1
+		? 'Normal food values'
+		: 'x' + currentMultiplier + ' food values';
+}
+
+function resetAll() {
+	for (var i = 0; i < rows.length; i++) rows[i].input.value = 0;
+	update();
+}
+
+function copyResult(e) {
+	var lines = ['Food Exp Calculation:'];
+	if (currentMultiplier > 1) lines.push('Feeding XP Multiplier: x' + currentMultiplier);
+	for (var i = 0; i < rows.length; i++) {
+		var qty = parseInt(rows[i].input.value) || 0;
+		if (qty > 0) {
+			var each = Math.round(foods[i].exp * currentMultiplier);
+			lines.push('  ' + foods[i].name + ' x' + qty + ' @ ' + each.toLocaleString() + ' = ' + (qty * each).toLocaleString() + ' EXP');
+		}
+	}
+	lines.push('Total: ' + totalExpEl.textContent + ' EXP');
+	navigator.clipboard.writeText(lines.join('\n')).then(function() {
+		var btn = e.target;
+		var old = btn.textContent;
+		btn.textContent = 'Copied!';
+		setTimeout(function() { btn.textContent = old; }, 1500);
+	});
+}
+
+function setFoodMultiplier(value) {
+	var n = parseFloat(value);
+	currentMultiplier = (isFinite(n) && n >= 1) ? n : 1;
+	update();
+}
+
+function setScanStatus(message, busy) {
+	scanStatus.textContent = message;
+	scanStatus.classList.toggle('busy', !!busy);
+}
+
+function scanAgain() {
+	if (activeFile) readScreenshot(activeFile);
+}
+
+function readScreenshot(file) {
+	if (!file || !file.type || file.type.indexOf('image/') !== 0) {
+		setScanStatus('Please choose an image file.', false);
+		return;
+	}
+
+	activeFile = file;
+	scanAgainBtn.disabled = false;
+	renderDetected({});
+	if (previewUrl) URL.revokeObjectURL(previewUrl);
+	previewUrl = URL.createObjectURL(file);
+	scanImagePreview.src = previewUrl;
+	scanPreview.hidden = false;
+	ocrDetails.hidden = true;
+	ocrText.value = '';
+
+	var runId = ++ocrRunId;
+	setScanStatus('Loading OCR engine...', true);
+
+	loadOcrEngine()
+		.then(function() { return prepareImageForOcr(file); })
+		.then(function(prepared) {
+			if (runId !== ocrRunId) return null;
+			activeBlob = prepared.blob;
+			activeScale = prepared.scale || 1;
+			setScanStatus('Reading screenshot...', true);
+			return Tesseract.recognize(prepared.blob, 'eng', {
+				logger: function(m) {
+					if (runId !== ocrRunId) return;
+					if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+						setScanStatus('Reading screenshot... ' + Math.round(m.progress * 100) + '%', true);
+					}
+				},
+				// PSM 11 = Sparse text: treats the image as scattered individual words
+				// rather than a document — ideal for game inventory UIs.
+				tessedit_pageseg_mode: '11'
+			});
+		})
+		.then(function(result) {
+			if (!result || runId !== ocrRunId) return Promise.resolve(null);
+			var data = result.data || {};
+			ocrText.value = (data.text || '').trim();
+			ocrDetails.hidden = !ocrText.value;
+			setScanStatus('Analyzing results...', true);
+			return extractQuantities(data, activeBlob);
+		})
+		.then(function(found) {
+			if (!found || runId !== ocrRunId) return;
+			var applied = applyDetectedQuantities(found);
+			renderDetected(found);
+			if (applied > 0) {
+				setScanStatus('Autofilled ' + applied + ' food' + (applied === 1 ? '' : 's') + '. Double-check the numbers before using the total.', false);
+			} else {
+				setScanStatus('No matching food quantities found. Crop closer to the food names and counts, then scan again.', false);
+			}
+		})
+		.catch(function(err) {
+			setScanStatus('Could not read the screenshot. Check your connection and try again.', false);
+			if (window.console) console.error(err);
+		});
+}
+
+function loadOcrEngine() {
+	if (window.Tesseract) return Promise.resolve();
+	if (ocrLoadPromise) return ocrLoadPromise;
+
+	ocrLoadPromise = new Promise(function(resolve, reject) {
+		var s = document.createElement('script');
+		s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+		s.async = true;
+		s.onload = function() { resolve(); };
+		s.onerror = function() { reject(new Error('OCR engine failed to load')); };
+		document.head.appendChild(s);
+	});
+
+	return ocrLoadPromise;
+}
+
+function prepareImageForOcr(file) {
+	return new Promise(function(resolve) {
+		var url = URL.createObjectURL(file);
+		var img = new Image();
+		img.onload = function() {
+			// Scale up so Tesseract can read the small game font.
+			// Target the long side at ~2400px; cap at 4x to limit memory.
+			var scale = Math.min(5, Math.max(1, 3000 / Math.max(img.width, img.height)));
+			if (!isFinite(scale) || scale <= 0) scale = 2;
+
+			var canvas = document.createElement('canvas');
+			canvas.width  = Math.max(1, Math.round(img.width  * scale));
+			canvas.height = Math.max(1, Math.round(img.height * scale));
+			var ctx = canvas.getContext('2d');
+			ctx.imageSmoothingEnabled = true;
+			ctx.imageSmoothingQuality = 'high';
+			ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+			// Saturation-based filter: badge/label text is WHITE (low saturation, high
+			// brightness) while food illustrations are COLORFUL (high saturation).
+			// This cleanly separates text from illustration noise at any scale,
+			// unlike a gray threshold which confuses bright illustration pixels with text.
+			// Result: white game text → black, everything else → white.
+			try {
+				var id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+				var d = id.data;
+				for (var p = 0; p < d.length; p += 4) {
+					var R = d[p] / 255, G = d[p+1] / 255, B = d[p+2] / 255;
+					var mx = R > G ? (R > B ? R : B) : (G > B ? G : B);
+					var mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
+					var sat = mx < 0.01 ? 0 : (mx - mn) / mx;
+					// text: low saturation (near-gray) AND high brightness (near-white)
+					var out = (sat < 0.25 && mx > 0.65) ? 0 : 255;
+					d[p] = out; d[p+1] = out; d[p+2] = out;
+				}
+				ctx.putImageData(id, 0, 0);
+			} catch(e) { /* cross-origin guard — skip if blocked, proceed unmodified */ }
+
+			URL.revokeObjectURL(url);
+			canvas.toBlob(function(blob) { resolve({ blob: blob || file, scale: scale }); }, 'image/png');
+		};
+		img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
+		img.src = url;
+	});
+}
+
+// ─── APPROACH ORCHESTRATOR ───────────────────────────────────────────────────
+// Runs all three approaches and merges results.
+// Returns a Promise<{foodName: quantity, ...}>
+function extractQuantities(data, blob) {
+	var words = data.words || [];
+
+	// Approach 1: Grid  (label → look-above for x-count)
+	var gridResult = extractByGrid(words);
+	var fromGrid   = gridResult.found;
+	var reocrList  = gridResult.reocr;   // m=false badges that may have digit fusion errors
+	// Approach 2: Anchor (x-count → look-below for label)
+	var fromAnchor = extractByAnchor(words);
+	// Approach 3: Text fallback (existing line-proximity logic)
+	var gridUsed = {};
+	for (var gk in fromGrid) gridUsed[fromGrid[gk]] = true;
+	var fromText = extractFromText(data.text || '', gridUsed);
+
+	function mergeOcr() {
+		var found = {};
+		for (var i = 0; i < foods.length; i++) {
+			var name = foods[i].name;
+			if      (fromGrid[name]   !== undefined) found[name] = fromGrid[name];
+			else if (fromAnchor[name] !== undefined) found[name] = fromAnchor[name];
+			else if (fromText[name]   !== undefined) found[name] = fromText[name];
+		}
+		return found;
+	}
+
+	// Run focused re-OCR on all grid-matched badges, then update the supplied result map.
+	function applyFocusedReocr(result) {
+		if (!reocrList.length) return Promise.resolve(result);
+		var tasks = reocrList.map(function(item) {
+			return focusedBadgeOcr(item.cx, item.cy).then(function(val) {
+				if (val === null || val < 50) return;
+				var orig = result[item.name];
+				// For previously x-marked badges the grid value is likely correct.
+				// Only override if focused re-OCR agrees within 20% — this prevents a
+				// bad crop from overwriting a good grid read.
+				// For m=false badges the grid value may be very wrong (e.g. 360 vs 960),
+				// so accept the focused result unconditionally.
+				if (item.wasMarked && orig !== undefined && Math.abs(val - orig) / orig > 0.20) return;
+				if (val !== orig) console.log('[Focused] ' + item.name + ': ' + orig + ' → ' + val);
+				result[item.name] = val;
+			});
+		});
+		return Promise.all(tasks).then(function() { return result; });
+	}
+
+	return applyFocusedReocr(mergeOcr());
+}
+
+// ─── FOCUSED BADGE RE-OCR ────────────────────────────────────────────────────
+// For badges where the × marker was not detected separately (m=false), the ×
+// character may have fused with the first digit in Tesseract's LSTM pass (e.g.
+// "×9" read as "3"), producing a wrong value.  This function crops just the
+// badge area from the original image, scales it up 10×, and runs PSM 8 (single
+// word) OCR with a digit-only whitelist — giving Tesseract the best chance to
+// read an isolated numeric token correctly.
+function focusedBadgeOcr(scaledCx, scaledCy) {
+	if (!activeFile || !activeScale || activeScale <= 0) return Promise.resolve(null);
+	return new Promise(function(resolve) {
+		var url = URL.createObjectURL(activeFile);
+		var img = new Image();
+		img.onload = function() {
+			URL.revokeObjectURL(url);
+			// Convert badge centre from scaled-image coords to original-image coords
+			var origCx = scaledCx / activeScale;
+			var origCy = scaledCy / activeScale;
+			// Crop a generous region around the badge (120×45 original pixels)
+			var cropW = 120, cropH = 45;
+			var cropX = Math.max(0, Math.round(origCx - cropW / 2));
+			var cropY = Math.max(0, Math.round(origCy - cropH / 2));
+			cropW = Math.min(cropW, img.width  - cropX);
+			cropH = Math.min(cropH, img.height - cropY);
+			if (cropW < 10 || cropH < 5) { resolve(null); return; }
+			// Upscale the crop 10× so digits are large and clear for Tesseract
+			var focusScale = 10;
+			var fc = document.createElement('canvas');
+			fc.width  = cropW * focusScale;
+			fc.height = cropH * focusScale;
+			var fctx = fc.getContext('2d');
+			fctx.imageSmoothingEnabled = true;
+			fctx.imageSmoothingQuality = 'high';
+			fctx.fillStyle = 'white';
+			fctx.fillRect(0, 0, fc.width, fc.height);
+			fctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, fc.width, fc.height);
+			// Apply same saturation filter used in main preprocessing
+			try {
+				var id = fctx.getImageData(0, 0, fc.width, fc.height);
+				var d = id.data;
+				for (var p = 0; p < d.length; p += 4) {
+					var R = d[p]/255, G = d[p+1]/255, B = d[p+2]/255;
+					var mx = R > G ? (R > B ? R : B) : (G > B ? G : B);
+					var mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
+					var sat = mx < 0.01 ? 0 : (mx - mn) / mx;
+					var out = (sat < 0.25 && mx > 0.65) ? 0 : 255;
+					d[p] = out; d[p+1] = out; d[p+2] = out;
+				}
+				fctx.putImageData(id, 0, 0);
+			} catch(e) {}
+			fc.toBlob(function(cropBlob) {
+				Tesseract.recognize(cropBlob, 'eng', {
+					tessedit_pageseg_mode: '8',
+					tessedit_char_whitelist: 'x0123456789'
+				}).then(function(r) {
+					var txt = (r.data.text || '').replace(/\s+/g, '');
+					// If no × detected and result starts with 3, the ×9→3 fusion may have
+					// occurred. Retry with a right-shifted crop that excludes the × zone.
+					if (!/^[x×]/i.test(txt) && /^3/.test(txt)) {
+						var skipPx = Math.round(fc.width * 0.30);
+						var dc = document.createElement('canvas');
+						dc.width  = fc.width - skipPx;
+						dc.height = fc.height;
+						dc.getContext('2d').drawImage(fc, skipPx, 0, dc.width, dc.height, 0, 0, dc.width, dc.height);
+						dc.toBlob(function(dBlob) {
+							Tesseract.recognize(dBlob, 'eng', {
+								tessedit_pageseg_mode: '8',
+								tessedit_char_whitelist: 'x0123456789'
+							}).then(function(r2) {
+								var txt2 = (r2.data.text || '').replace(/\s+/g, '');
+								var val2 = parseQuantity(txt2);
+								resolve(val2 !== null && val2 >= 50 ? val2 : parseQuantity(txt));
+							}).catch(function() { resolve(parseQuantity(txt)); });
+						}, 'image/png');
+						return;
+					}
+					resolve(parseQuantity(txt));
+				}).catch(function() { resolve(null); });
+			}, 'image/png');
+		};
+		img.onerror = function() { URL.revokeObjectURL(url); resolve(null); };
+		img.src = url;
+	});
+}
+
+// ─── APPROACH 1: GRID (improved) ─────────────────────────────────────────────
+// For each food label found via OCR bounding boxes, look ABOVE it within the
+// same tile column for the closest x-count badge.  Falls back to any number
+// if no x-marked one is found.
+
+function buildUsableWords(words) {
+	var usable = [];
+	var hasBoxes = false;
+	for (var i = 0; i < words.length; i++) {
+		var raw = words[i].text || '';
+		var norm = normalizeToken(raw);
+		if (!norm) continue;
+		var box = words[i].bbox || {};
+		var x0 = +box.x0 || 0, y0 = +box.y0 || 0, x1 = +box.x1 || 0, y1 = +box.y1 || 0;
+		if (x1 > x0 && y1 > y0) hasBoxes = true;
+		usable.push({
+			text: raw,
+			norm: norm,
+			x0: x0, y0: y0, x1: x1, y1: y1,
+			cx: (x0 + x1) / 2,
+			cy: (y0 + y1) / 2
+		});
+	}
+
+	// Merge adjacent tokens that are both numeric and were likely split by OCR
+	// (e.g. "60" + "2" → "602", "x4" + "36" → "x436").
+	// Sort by row then x so the forward pass always sees left-to-right order.
+	usable.sort(function(a, b) {
+		if (Math.abs(a.cy - b.cy) > 25) return a.cy - b.cy;
+		return a.cx - b.cx;
+	});
+	// Log numeric tokens before merge to see if Tesseract output "8818" as one token
+	var numericTokens = usable.filter(function(t){ return /\d/.test(t.norm); });
+	console.log('[RAW nums] ' + numericTokens.map(function(t){
+		return '"' + t.norm + '"@(' + Math.round(t.cx) + ',' + Math.round(t.cy) + ')';
+	}).join(', '));
+	var merged = [];
+	for (var mi = 0; mi < usable.length; mi++) {
+		var cur = usable[mi];
+		if (merged.length > 0) {
+			var prev = merged[merged.length - 1];
+			var gap = cur.x0 - prev.x1;
+			var sameRow  = Math.abs(cur.cy - prev.cy) < 25;
+			var adjacent = gap >= -5 && gap <= 40; // small gap or tiny overlap
+			var bothNum  = /\d/.test(cur.norm) && /\d/.test(prev.norm);
+			// Only merge when the right token is no longer than the left token.
+			// This matches the "trailing fragment" pattern where OCR splits a number
+			// near its end (e.g. "81"+"8"→"818", "60"+"2"→"602").
+			// It prevents a short stray token from fusing with the start of a longer
+			// token (e.g. stray "8"+"81" is blocked because cur.len(2) > prev.len(1)).
+			var shortAppend = cur.norm.length <= prev.norm.length || /^\d$/.test(prev.norm);
+			if (sameRow && adjacent && bothNum && shortAppend) {
+				merged[merged.length - 1] = {
+					text: prev.text + cur.text,
+					norm: prev.norm + cur.norm,
+					x0: prev.x0, y0: Math.min(prev.y0, cur.y0),
+					x1: cur.x1,  y1: Math.max(prev.y1, cur.y1),
+					cx: (prev.x0 + cur.x1) / 2,
+					cy: (prev.cy  + cur.cy)  / 2
+				};
+				continue;
+			}
+		}
+		merged.push(cur);
+	}
+	usable = merged;
+
+	return { usable: usable, hasBoxes: hasBoxes };
+}
+
+function findFoodBoxes(usable) {
+	return findFoodBoxesFromList(usable, foods, false);
+}
+
+function findFoodBoxesFromList(usable, foodList, blocked) {
+	var boxes = [];
+	for (var f = 0; f < foodList.length; f++) {
+		var aliasParts = foodList[f].aliasParts;
+		var matched = false;
+		for (var a = 0; a < aliasParts.length && !matched; a++) {
+			var parts = aliasParts[a].words;
+			for (var w = 0; w < usable.length; w++) {
+				var box = matchAliasAt(usable, w, parts);
+				if (!box) continue;
+				boxes.push({
+					foodIdx: f,
+					blocked: !!blocked,
+					cx: (box.x0 + box.x1) / 2,
+					cy: (box.y0 + box.y1) / 2,
+					w: box.x1 - box.x0,
+					h: box.y1 - box.y0
+				});
+				matched = true;
+				break;
+			}
+		}
+	}
+	if (!blocked) console.log('[FOOD] detected: ' + boxes.map(function(b){ return foods[b.foodIdx].name + '@cx=' + Math.round(b.cx); }).join(', '));
+	return boxes;
+}
+
+function findQuantityCandidates(usable) {
+	var candidates = [];
+	for (var i = 0; i < usable.length; i++) {
+		var v = parseQuantity(usable[i].text);
+		if (v === null) continue;
+		candidates.push({
+			value: v,
+			cx: usable[i].cx,
+			cy: usable[i].cy,
+			marked: isQuantityMarked(usable[i].text) || hasNearbyXMarker(usable, i)
+		});
+	}
+	console.log('[QTY] all candidates: ' + candidates.map(function(c){ return c.value + '@(' + Math.round(c.cx) + ',' + Math.round(c.cy) + ')m=' + c.marked; }).join(', '));
+	return candidates;
+}
+
+function clusterByRow(items, threshold) {
+	var sorted = items.slice().sort(function(a, b) { return a.cy - b.cy; });
+	var groups = [];
+	for (var i = 0; i < sorted.length; i++) {
+		var item = sorted[i];
+		var matched = false;
+		for (var g = 0; g < groups.length; g++) {
+			if (Math.abs(groups[g].meanY - item.cy) < threshold) {
+				groups[g].items.push(item);
+				groups[g].meanY = (groups[g].meanY * (groups[g].items.length - 1) + item.cy) / groups[g].items.length;
+				matched = true;
+				break;
+			}
+		}
+		if (!matched) groups.push({ meanY: item.cy, items: [item] });
+	}
+	groups.sort(function(a, b) { return a.meanY - b.meanY; });
+	for (var g = 0; g < groups.length; g++) {
+		groups[g].items.sort(function(a, b) { return a.cx - b.cx; });
+	}
+	return groups;
+}
+
+function median(arr) {
+	if (!arr.length) return 0;
+	var sorted = arr.slice().sort(function(a, b) { return a - b; });
+	var mid = Math.floor(sorted.length / 2);
+	if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+	return sorted[mid];
+}
+
+function extractByGrid(words) {
+	var built = buildUsableWords(words);
+	if (!built.hasBoxes) return {};
+	var usable = built.usable;
+
+	var foodBoxes = findFoodBoxesFromList(usable, foods, false);
+	if (foodBoxes.length < 1) return {};
+
+	var quantities = findQuantityCandidates(usable);
+	if (!quantities.length) return {};
+
+	// Detect Lightning Fruit label positions — we exclude its ENTIRE COLUMN
+	var lightningBoxes = findFoodBoxesFromList(usable, blockedFoods, true);
+
+	// Cluster food labels and ALL quantity candidates into horizontal rows
+	var foodRows = clusterByRow(foodBoxes, 50);
+	var qtyRows  = clusterByRow(quantities, 50);
+
+	// Estimate tile width from column spacings between food labels
+	var colSpacings = [];
+	for (var r = 0; r < foodRows.length; r++) {
+		var ri = foodRows[r].items;
+		for (var c = 1; c < ri.length; c++) {
+			colSpacings.push(ri[c].cx - ri[c - 1].cx);
+		}
+	}
+	var tileW = median(colSpacings);
+	if (!tileW || tileW < 40) {
+		var wArr = [];
+		for (var i = 0; i < foodBoxes.length; i++) wArr.push(foodBoxes[i].w || 40);
+		tileW = (median(wArr) || 40) * 2.5;
+		if (!tileW || tileW < 40) tileW = 100;
+	}
+
+	// Column tolerance: half tile width determines same-column membership
+	var colTol = tileW * 0.55;
+
+	// X-centers of blocked (Lightning Fruit) tiles — exclude their entire column
+	var lightningCols = [];
+	for (var l = 0; l < lightningBoxes.length; l++) {
+		lightningCols.push(lightningBoxes[l].cx);
+	}
+
+	function isBlockedColumn(cx) {
+		for (var l = 0; l < lightningCols.length; l++) {
+			if (Math.abs(cx - lightningCols[l]) < colTol) return true;
+		}
+		return false;
+	}
+
+	// Estimate tile height from food-row spacing so we never reach into the wrong row
+	var tileH = 300; // safe default in scaled-image pixels
+	if (foodRows.length >= 2) {
+		tileH = (foodRows[foodRows.length - 1].meanY - foodRows[0].meanY) / (foodRows.length - 1);
+	}
+	var maxAbove = tileH * 1.1; // a real badge must be within one tile-height above the label
+	// Food illustrations have bright highlights that can generate noise tokens at mid-tile.
+	// Real badges sit at the TOP of the tile (~75-85% of tileH above the label).
+	// Noise sits at mid-tile (~20-50% of tileH above the label).
+	// Reject any qty row closer than 50% of tileH to avoid picking noise over real badges.
+	var minAbove = tileH * 0.45;
+
+	console.log('[Grid] tileH=' + Math.round(tileH) + ' maxAbove=' + Math.round(maxAbove) + ' minAbove=' + Math.round(minAbove) + ' foodRows=' + foodRows.length + ' qtyRows=' + qtyRows.length);
+	console.log('[Grid] qtyRow meanYs: ' + qtyRows.map(function(r){ return Math.round(r.meanY) + '(n=' + r.items.length + ')'; }).join(', '));
+	console.log('[Grid] foodRow meanYs: ' + foodRows.map(function(r){ return Math.round(r.meanY) + '(n=' + r.items.length + ')'; }).join(', '));
+
+	var found = {};
+	var reocr = []; // m=false badges to re-examine with focused OCR
+
+	for (var fr = 0; fr < foodRows.length; fr++) {
+		var fRow = foodRows[fr];
+
+		// Find the closest quantity row that is strictly ABOVE this food-label row,
+		// within one tile-height (prevents picking badges from the row above),
+		// and at least minAbove (prevents picking mid-tile illustration noise instead of real badge).
+		var bestQtyRow = null;
+		var bestVertDist = Infinity;
+		for (var qr = 0; qr < qtyRows.length; qr++) {
+			var qRow = qtyRows[qr];
+			if (qRow.meanY >= fRow.meanY) continue;
+			var vd = fRow.meanY - qRow.meanY;
+			if (vd > maxAbove) continue;          // too far — different tile row
+			if (vd < minAbove) continue;          // too close — noise from food illustration, not a real badge
+			if (vd < bestVertDist) { bestVertDist = vd; bestQtyRow = qRow; }
+		}
+		console.log('[Grid] fRow Y=' + Math.round(fRow.meanY) + ' -> bestQtyRow Y=' + (bestQtyRow ? Math.round(bestQtyRow.meanY) : 'none') + ' vd=' + Math.round(bestVertDist));
+		if (!bestQtyRow) continue;
+
+		// Remove quantities that fall in the Lightning Fruit column
+		var validQtys = [];
+		for (var q = 0; q < bestQtyRow.items.length; q++) {
+			if (!isBlockedColumn(bestQtyRow.items[q].cx)) {
+				validQtys.push(bestQtyRow.items[q]);
+			}
+		}
+
+		var foodsSorted = fRow.items.slice().sort(function(a, b) { return a.cx - b.cx; });
+		// Once a quantity is claimed by one food it cannot be claimed by another.
+		// This prevents the same badge value being "doubled" onto an adjacent food.
+		var usedQtyIdx = {};
+
+		for (var fi = 0; fi < foodsSorted.length; fi++) {
+			var fb = foodsSorted[fi];
+			var name = foods[fb.foodIdx].name;
+			if (found[name] !== undefined) continue;
+
+			// PASS 1: prefer x-marked quantities (badge has explicit "x" prefix)
+			// These are the real game badges — emoji OCR noise is never x-marked.
+			var bestQ = null;
+			var bestQIdx = -1;
+			var bestXDist = colTol;
+			for (var qi = 0; qi < validQtys.length; qi++) {
+				if (usedQtyIdx[qi]) continue;
+				if (!validQtys[qi].marked) continue;
+				var xd = Math.abs(validQtys[qi].cx - fb.cx);
+				if (xd < bestXDist) { bestXDist = xd; bestQ = validQtys[qi]; bestQIdx = qi; }
+			}
+
+			// PASS 2: no x-marked found — accept any number ≥ 50 in same column
+			if (bestQ === null) {
+				bestXDist = colTol;
+				for (var qi2 = 0; qi2 < validQtys.length; qi2++) {
+					if (usedQtyIdx[qi2]) continue;
+					if (validQtys[qi2].value < 50) continue;
+					var xd2 = Math.abs(validQtys[qi2].cx - fb.cx);
+					if (xd2 < bestXDist) { bestXDist = xd2; bestQ = validQtys[qi2]; bestQIdx = qi2; }
+				}
+			}
+
+			if (bestQ !== null) {
+				found[name] = bestQ.value;
+				usedQtyIdx[bestQIdx] = true;   // mark consumed — no other food may claim this badge
+				// Queue every matched badge for focused re-OCR, not just m=false ones.
+				// Even x-marked badges can have digit misreads in the game font.
+				reocr.push({ name: name, cx: bestQ.cx, cy: bestQ.cy, wasMarked: bestQ.marked });
+			} else {
+				console.log('[Grid] MISS: ' + name + ' (no qty in column, validQtys=' + validQtys.length + ')');
+			}
+		}
+	}
+
+	console.log('[Grid] found:', JSON.stringify(found));
+	return { found: found, reocr: reocr };
+}
+
+// ─── APPROACH 2: ANCHOR ──────────────────────────────────────────────────────
+// Start from every x-marked count badge, find the closest food label BELOW it
+// in the same tile column.  Excludes entire Lightning Fruit column.
+function extractByAnchor(words) {
+	var built = buildUsableWords(words);
+	if (!built.hasBoxes) return {};
+	var usable = built.usable;
+
+	var foodBoxes = findFoodBoxesFromList(usable, foods, false);
+	if (!foodBoxes.length) return {};
+
+	// Detect Lightning Fruit column positions for exclusion
+	var lightningBoxes = findFoodBoxesFromList(usable, blockedFoods, true);
+
+	// Estimate tile width from food label column spacings
+	var labelRows = clusterByRow(foodBoxes, 50);
+	var colSpacings = [];
+	for (var r = 0; r < labelRows.length; r++) {
+		var ri = labelRows[r].items;
+		for (var c = 1; c < ri.length; c++) colSpacings.push(ri[c].cx - ri[c-1].cx);
+	}
+	var tileW = median(colSpacings);
+	if (!tileW || tileW < 40) tileW = 130;
+	var colTol = tileW * 0.55;
+
+	// Column X-centers for Lightning Fruit
+	var lightningCols = [];
+	for (var l = 0; l < lightningBoxes.length; l++) {
+		lightningCols.push(lightningBoxes[l].cx);
+	}
+	function isBlockedColumn(cx) {
+		for (var l = 0; l < lightningCols.length; l++) {
+			if (Math.abs(cx - lightningCols[l]) < colTol) return true;
+		}
+		return false;
+	}
+
+	// Collect only x-marked quantity badges, excluding blocked columns
+	var markedQtys = [];
+	for (var i = 0; i < usable.length; i++) {
+		var v = parseQuantity(usable[i].text);
+		if (v === null) continue;
+		if (isBlockedColumn(usable[i].cx)) continue;
+		if (isQuantityMarked(usable[i].text) || hasNearbyXMarker(usable, i)) {
+			markedQtys.push({ value: v, cx: usable[i].cx, cy: usable[i].cy });
+		}
+	}
+	if (!markedQtys.length) return {};
+
+	// Sort food labels left-to-right so we consume badges in column order,
+	// making deduplication deterministic (leftmost food wins leftmost badge).
+	foodBoxes.sort(function(a, b) { return a.cx - b.cx; });
+
+	// For each food label, find the nearest x-badge ABOVE it in the same column.
+	// A badge that is claimed by one food is removed from contention.
+	var found = {};
+	var usedAnchorIdx = {};
+	for (var f = 0; f < foodBoxes.length; f++) {
+		var lbl  = foodBoxes[f];
+		var name = foods[lbl.foodIdx].name;
+		if (found[name] !== undefined) continue;
+
+		var best = null, bestDist = Infinity, bestIdx = -1;
+		for (var q = 0; q < markedQtys.length; q++) {
+			if (usedAnchorIdx[q]) continue;
+			var qty = markedQtys[q];
+			if (qty.cy >= lbl.cy) continue;
+			var dx = Math.abs(qty.cx - lbl.cx);
+			if (dx > colTol) continue;
+			var dy  = lbl.cy - qty.cy;
+			var dist = Math.sqrt(dx*dx + dy*dy);
+			if (dist < bestDist) { bestDist = dist; best = qty; bestIdx = q; }
+		}
+		if (best !== null) {
+			found[name] = best.value;
+			usedAnchorIdx[bestIdx] = true;
+		}
+	}
+	return found;
+}
+
+// ─── APPROACH 3: VISION (Claude API) ─────────────────────────────────────────
+
+function extractFromText(text, gridUsed) {
+	gridUsed = gridUsed || {};
+	var lines = text.split(/\r?\n/);
+	var foodHits = [];
+	var quantityHits = [];
+	var blockedLines = {}; // line indices that belong to a blocked tile
+
+	for (var i = 0; i < lines.length; i++) {
+		var line = lines[i];
+		var lower = line.toLowerCase().replace(/[|!]/g, 'i').replace(/0/g, 'o');
+		var compact = lower.replace(/[^a-z0-9]+/g, '');
+
+		// Check for blocked labels first — mark nearby lines as off-limits
+		for (var b = 0; b < blockedFoods.length; b++) {
+			var bparts = blockedFoods[b].aliasParts;
+			for (var ba = 0; ba < bparts.length; ba++) {
+				if (findAliasPosition(lower, compact, bparts[ba]) >= 0) {
+					blockedLines[i - 1] = true;
+					blockedLines[i]     = true;
+					blockedLines[i + 1] = true;
+					break;
+				}
+			}
+		}
+
+		for (var f = 0; f < foods.length; f++) {
+			var parts = foods[f].aliasParts;
+			for (var a = 0; a < parts.length; a++) {
+				var pos = findAliasPosition(lower, compact, parts[a]);
+				if (pos >= 0) {
+					foodHits.push({ foodIdx: f, line: i, charPos: pos });
+					break;
+				}
+			}
+		}
+
+		var re = /(x\s*)?(\d[\d,]*(?:\.\d+)?\s*[km]?)/ig;
+		var match;
+		while ((match = re.exec(line)) !== null) {
+			var v = parseQuantity(match[2]);
+			if (v === null) continue;
+			var prefixLen = match[1] ? match[1].length : 0;
+			quantityHits.push({
+				value: v,
+				line: i,
+				charPos: match.index + prefixLen,
+				marked: !!match[1]
+			});
+		}
+	}
+
+	var assigned = {};
+	var valueUsage = {};
+	var pairs = [];
+
+	for (var h = 0; h < foodHits.length; h++) {
+		var fh = foodHits[h];
+		var best = null;
+		var bestScore = Infinity;
+
+		for (var q = 0; q < quantityHits.length; q++) {
+			var qh = quantityHits[q];
+			// Skip quantities on blocked lines (Lightning Fruit area)
+			if (blockedLines[qh.line]) continue;
+			// Skip values already assigned by the grid method
+			if (gridUsed[qh.value]) continue;
+			var lineDist = qh.line - fh.line;
+			if (lineDist < -3 || lineDist > 3) continue;
+
+			var charDist = Math.abs(qh.charPos - fh.charPos);
+			var score = Math.abs(lineDist) * 90 + charDist;
+			if (qh.marked) score -= 40;
+
+			if (score < bestScore) {
+				bestScore = score;
+				best = qh;
+			}
+		}
+
+		if (best !== null) {
+			pairs.push({ foodIdx: fh.foodIdx, value: best.value });
+			valueUsage[best.value] = (valueUsage[best.value] || 0) + 1;
+		}
+	}
+
+	var assigned = {};
+	for (var p = 0; p < pairs.length; p++) {
+		var pair = pairs[p];
+		var name = foods[pair.foodIdx].name;
+		if (assigned[name] !== undefined) continue;
+		if (valueUsage[pair.value] >= foods.length) continue;
+		assigned[name] = pair.value;
+	}
+
+	return assigned;
+}
+
+function findAliasPosition(lower, compact, alias) {
+	var direct = lower.indexOf(alias.phrase);
+	if (direct >= 0) return direct;
+	var c = compact.indexOf(alias.compact);
+	if (c >= 0) {
+		var seen = 0;
+		for (var i = 0; i < lower.length; i++) {
+			if (/[a-z0-9]/.test(lower.charAt(i))) {
+				if (seen === c) return i;
+				seen++;
+			}
+		}
+	}
+	return -1;
+}
+
+function applyDetectedQuantities(found) {
+	var hasAny = false;
+	for (var i = 0; i < foods.length; i++) {
+		if (found[foods[i].name] !== undefined) { hasAny = true; break; }
+	}
+	if (!hasAny) return 0;
+
+	var applied = 0;
+	for (var i = 0; i < foods.length; i++) {
+		var qty = found[foods[i].name];
+		if (typeof qty === 'number' && isFinite(qty) && qty >= 0) {
+			rows[i].input.value = Math.floor(qty);
+			applied++;
+		} else {
+			rows[i].input.value = 0;
+		}
+	}
+	update();
+	return applied;
+}
+
+function renderDetected(found) {
+	detectedList.innerHTML = '';
+	for (var i = 0; i < foods.length; i++) {
+		var qty = found[foods[i].name];
+		if (qty === undefined) continue;
+		var span = document.createElement('span');
+		span.textContent = foods[i].name + ': ' + Math.floor(qty).toLocaleString();
+		detectedList.appendChild(span);
+	}
+}
+
+function normalizePhrase(value) {
+	return String(value || '')
+		.toLowerCase()
+		.replace(/[|!]/g, 'i')
+		.replace(/0/g, 'o')
+		.replace(/[^a-z0-9]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function normalizeToken(value) {
+	return normalizePhrase(value).replace(/\s/g, '');
+}
+
+function matchAliasAt(words, start, parts) {
+	if (!parts.length) return null;
+	var end = start + parts.length - 1;
+	if (end >= words.length) return null;
+	for (var i = 0; i < parts.length; i++) {
+		if (!tokensClose(words[start + i].norm, parts[i])) return null;
+	}
+	var box = { x0: words[start].x0, y0: words[start].y0, x1: words[start].x1, y1: words[start].y1 };
+	for (var j = start + 1; j <= end; j++) {
+		if (words[j].x0 < box.x0) box.x0 = words[j].x0;
+		if (words[j].y0 < box.y0) box.y0 = words[j].y0;
+		if (words[j].x1 > box.x1) box.x1 = words[j].x1;
+		if (words[j].y1 > box.y1) box.y1 = words[j].y1;
+	}
+	return box;
+}
+
+function isQuantityMarked(text) {
+	var t = String(text || '');
+	if (!t) return false;
+	if (/^[x×]/i.test(t) && /\d/.test(t)) return true;
+	return /(?:^|\b)(?:qty|quantity|owned|amount)\s*[:#-]?\s*[\dil|!]/i.test(t);
+}
+
+function hasNearbyXMarker(words, index) {
+	var t = words[index];
+	var cy = (t.y0 + t.y1) / 2;
+	for (var i = 0; i < words.length; i++) {
+		if (i === index || words[i].norm !== 'x') continue;
+		var mCy = (words[i].y0 + words[i].y1) / 2;
+		var mRight = words[i].x1;
+		if (Math.abs(mCy - cy) <= 12 && mRight <= t.x0 + 8 && t.x0 - mRight <= 20) return true;
+	}
+	return false;
+}
+
+var ocrDigitMap = { 'i': '1', 'l': '1', '|': '1', '!': '1', 'o': '0', 'q': '0', 'b': '8', 'd': '4', 's': '5', 'z': '2', 'g': '9' };
+
+function ocrFixDigits(text) {
+	var t = String(text || '').toLowerCase();
+	if (!t) return '';
+	var out = '';
+	var runStart = -1;
+	var runHasDigit = false;
+	for (var i = 0; i <= t.length; i++) {
+		var ch = i < t.length ? t.charAt(i) : '';
+		var isDigit = ch >= '0' && ch <= '9';
+		var isAmbig = ocrDigitMap.hasOwnProperty(ch);
+		if (isDigit || isAmbig) {
+			if (runStart < 0) runStart = i;
+			if (isDigit) runHasDigit = true;
+		} else {
+			if (runStart >= 0) {
+				var run = t.substring(runStart, i);
+				if (runHasDigit) {
+					var fixed = '';
+					for (var j = 0; j < run.length; j++) {
+						var c = run.charAt(j);
+						fixed += ocrDigitMap.hasOwnProperty(c) ? ocrDigitMap[c] : c;
+					}
+					out += fixed;
+				} else {
+					out += run;
+				}
+				runStart = -1;
+				runHasDigit = false;
+			}
+			if (ch) out += ch;
+		}
+	}
+	return out;
+}
+
+function parseQuantity(value) {
+	var raw = String(value || '');
+	if (!raw) return null;
+	// Strip whitespace OCR injects inside tokens (e.g. "31 1" → "311", "x 1364" → "x1364")
+	raw = raw.replace(/\s+/g, '');
+	// Artifact fix: if "x" + letter + digits where the letter maps to the same digit
+	// that follows, strip the letter — it's a stray character from adjacent UI elements
+	// fused into the token by Tesseract (e.g. "xb818" → 'b'→'8', next digit '8' → "x818").
+	raw = raw.replace(/^([x×])([a-z])(\d)(\d+)/i, function(m, marker, letter, d1, rest) {
+		var mapped = ocrDigitMap[letter.toLowerCase()];
+		return (mapped && mapped === d1) ? marker + d1 + rest : m;
+	});
+	var fixed = ocrFixDigits(raw).replace(/,/g, '');
+	if (!/\d/.test(fixed)) return null;
+	var match = fixed.match(/(\d+(?:\.\d+)?)\s*([km])?/);
+	if (!match) return null;
+	var n = parseFloat(match[1]);
+	if (!isFinite(n)) return null;
+	if (match[2] === 'k') n *= 1000;
+	else if (match[2] === 'm') n *= 1000000;
+	n = Math.max(0, Math.round(n));
+	if (n < 10) return null;      // reject single-digit OCR artifacts
+	if (n > 9999999) return null;
+	return n;
+}
+
+function tokensClose(a, b) {
+	if (a === b) return true;
+	if (a.length < 3 || b.length < 3) return false;
+	if (Math.abs(a.length - b.length) > 2) return false;
+	return levenshtein(a, b) <= (a.length <= 4 ? 1 : 2);
+}
+
+function levenshtein(a, b) {
+	var prev = [];
+	var curr = [];
+	for (var i = 0; i <= b.length; i++) prev[i] = i;
+	for (var x = 1; x <= a.length; x++) {
+		curr[0] = x;
+		for (var y = 1; y <= b.length; y++) {
+			var cost = a.charAt(x - 1) === b.charAt(y - 1) ? 0 : 1;
+			var m = prev[y] + 1;
+			if (curr[y - 1] + 1 < m) m = curr[y - 1] + 1;
+			if (prev[y - 1] + cost < m) m = prev[y - 1] + cost;
+			curr[y] = m;
+		}
+		var tmp = prev; prev = curr; curr = tmp;
+	}
+	return prev[b.length];
+}
+
+function toggleTheme() {
+	var b = document.body;
+	var nowLight = b.classList.contains('dark');
+	b.classList.toggle('dark', !nowLight);
+	b.classList.toggle('light', nowLight);
+	themeBtn.textContent = nowLight ? '\u263D' : '\u2600';
+	try { localStorage.setItem('theme', nowLight ? 'light' : 'dark'); } catch (e) {}
+}
+
+(function init() {
+	try {
+		if (localStorage.getItem('theme') === 'light') {
+			document.body.classList.remove('dark');
+			document.body.classList.add('light');
+			themeBtn.textContent = '\u263D';
+		} else {
+			themeBtn.textContent = '\u2600';
+		}
+	} catch (e) {
+		themeBtn.textContent = '\u2600';
+	}
+	update();
+})();
+</script>
+
+</body>
+</html>
