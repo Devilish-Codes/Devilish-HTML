@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lua VM Obfuscator</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0010;color:#e0d0ff;font-family:'Consolas','Courier New',monospace;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px}
+h1{font-size:1.5rem;color:#c89eff;margin-bottom:4px;letter-spacing:1px}
+.subtitle{font-size:.8rem;color:#7a6a99;margin-bottom:20px}
+.container{width:100%;max-width:1100px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.panel{background:#1a0025;border:1px solid #3d1a5c;border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+.panel-header{background:#2a0040;padding:8px 14px;font-size:.8rem;color:#b080ff;border-bottom:1px solid #3d1a5c;display:flex;align-items:center;gap:8px}
+textarea{flex:1;background:#0d0018;color:#d4c0ff;font-family:'Consolas','Courier New',monospace;font-size:12px;border:none;padding:12px;resize:none;outline:none;min-height:480px;line-height:1.5}
+textarea::placeholder{color:#3d2a5c}
+.controls{padding:12px;background:#1a0025;border-top:1px solid #3d1a5c;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button{background:#5c0080;color:#f0e0ff;border:1px solid #9060c0;border-radius:5px;padding:8px 18px;cursor:pointer;font-family:inherit;font-size:.85rem;transition:background .15s}
+button:hover{background:#7a00b0}
+button.secondary{background:#2a003a;color:#c090ff}
+button.secondary:hover{background:#3a0055}
+.stat-bar{display:flex;gap:16px;font-size:.75rem;color:#9070b0;flex:1;flex-wrap:wrap}
+.stat{display:flex;gap:4px}
+.stat .val{color:#c89eff}
+.status{padding:8px 14px;font-size:.75rem;color:#9060c0;min-height:28px;background:#160020;border-top:1px solid #2d0045}
+.error{color:#ff6060}
+.ok{color:#60e080}
+</style>
+</head>
+<body>
+<h1>Lua VM Obfuscator</h1>
+<div class="subtitle">Tree-walking VM &mdash; unique opcodes per build &mdash; cell upvalues &mdash; full Luau compatibility</div>
+<div class="container">
+  <div class="panel">
+    <div class="panel-header">&#x1f4cb; Input</div>
+    <textarea id="inp" placeholder="Paste Lua source here..."></textarea>
+    <div class="controls">
+      <button onclick="run()">&#x25B6; Obfuscate</button>
+      <button class="secondary" onclick="document.getElementById('inp').value='';status('')">Clear</button>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">&#x1f512; Output</div>
+    <textarea id="out" readonly placeholder="Obfuscated output will appear here..."></textarea>
+    <div class="controls">
+      <button onclick="copyOut()">&#x1f4cb; Copy</button>
+      <div class="stat-bar" id="stats"></div>
+    </div>
+  </div>
+</div>
+<div class="status" id="statusbar"></div>
+
+<script>
+const inp = document.getElementById('inp');
+const out  = document.getElementById('out');
+const sb   = document.getElementById('statusbar');
+const statsEl = document.getElementById('stats');
+
+function status(msg, ok){
+  sb.textContent = msg;
+  sb.className = 'status ' + ((ok===false)?'error':'ok');
+}
+function copyOut(){ navigator.clipboard.writeText(out.value); status('Copied to clipboard'); }
+function run(){
+  const src = inp.value.trim();
+  if(!src){ status('No input.',false); return; }
+  try {
+    const result = obfuscateVM(src);
+    out.value = result;
+    const ratio = (result.length / src.length * 100).toFixed(0);
+    statsEl.innerHTML =
+      '<span class="stat">Input <span class="val">'+src.length.toLocaleString()+'b</span></span>' +
+      '<span class="stat">Output <span class="val">'+result.length.toLocaleString()+'b</span></span>' +
+      '<span class="stat">Ratio <span class="val">'+ratio+'%</span></span>';
+    status('Done.');
+  } catch(e){ status('Error: '+e.message, false); console.error(e); }
+}
+
+// ─── TOKENIZER ────────────────────────────────────────────────────────────────
+const TK_NAME=1, TK_NUMBER=2, TK_STRING=3, TK_OP=4, TK_EOF=5;
+const KEYWORDS = new Set([
+  'and','break','continue','do','else','elseif','end','false','for','function','goto',
+  'if','in','local','nil','not','or','repeat','return','then','true','until','while'
+]);
+
+function tokenize(src){
+  const tokens = [];
+  let i = 0;
+  const n = src.length;
+  function adv(){ return src[i++]; }
+
+  while(i < n){
+    // whitespace
+    if(' \t\r\n'.includes(src[i])){ i++; continue; }
+    // comment
+    if(src[i]==='-' && src[i+1]==='-'){
+      i+=2;
+      if(src[i]==='['){
+        let lvl=0, j=i+1;
+        while(src[j]==='='){lvl++;j++;}
+        if(src[j]==='['){
+          i=j+1;
+          const close=']'+('='.repeat(lvl))+']';
+          const end=src.indexOf(close,i);
+          i = end===-1?n:end+close.length;
+          continue;
+        }
+      }
+      while(i<n && src[i]!=='\n') i++;
+      continue;
+    }
+    // long string
+    if(src[i]==='[' && (src[i+1]==='[' || src[i+1]==='=')){
+      let lvl=0, j=i+1;
+      while(src[j]==='='){lvl++;j++;}
+      if(src[j]==='['){
+        const start=j+1; i=start;
+        const close=']'+('='.repeat(lvl))+']';
+        const end=src.indexOf(close,i);
+        const val = end===-1?src.slice(start):src.slice(start,end);
+        i = end===-1?n:end+close.length;
+        tokens.push({t:TK_STRING, v:val});
+        continue;
+      }
+    }
+    // quoted string
+    if(src[i]==='"' || src[i]==="'"){
+      const q=adv(); let s='';
+      while(i<n && src[i]!==q){
+        if(src[i]==='\\'){
+          i++;
+          const c=adv();
+          if(c==='n') s+='\n';
+          else if(c==='t') s+='\t';
+          else if(c==='r') s+='\r';
+          else if(c==='"') s+='"';
+          else if(c==="'") s+="'";
+          else if(c==='\\') s+='\\';
+          else if(c==='0') s+='\0';
+          else if(c==='a') s+='\x07';
+          else if(c==='b') s+='\x08';
+          else if(c==='f') s+='\x0C';
+          else if(c==='v') s+='\x0B';
+          else if(c>='0'&&c<='9'){
+            let nd=c;
+            if(i<n&&src[i]>='0'&&src[i]<='9') nd+=adv();
+            if(i<n&&src[i]>='0'&&src[i]<='9') nd+=adv();
+            s+=String.fromCharCode(parseInt(nd));
+          } else if(c==='x'){
+            const h=adv()+adv();
+            s+=String.fromCharCode(parseInt(h,16));
+          } else if(c==='u'){
+            i++; // skip {
+            let hex='';
+            while(i<n && src[i]!=='}') hex+=adv();
+            i++; // skip }
+            s+=String.fromCodePoint(parseInt(hex,16));
+          } else s+=c;
+        } else s+=adv();
+      }
+      if(src[i]===q) i++;
+      tokens.push({t:TK_STRING, v:s});
+      continue;
+    }
+    // number
+    if((src[i]>='0'&&src[i]<='9') || (src[i]==='.'&&src[i+1]>='0'&&src[i+1]<='9')){
+      let s='';
+      if(src[i]==='0' && (src[i+1]==='x'||src[i+1]==='X')){
+        s+=adv()+adv();
+        while(i<n && /[0-9a-fA-F_]/.test(src[i])) s+=adv();
+      } else {
+        while(i<n && (src[i]>='0'&&src[i]<='9' || src[i]==='_')) s+=adv();
+        if(i<n && src[i]==='.') {
+          s+=adv();
+          while(i<n && (src[i]>='0'&&src[i]<='9' || src[i]==='_')) s+=adv();
+        }
+        if(i<n && (src[i]==='e'||src[i]==='E')){
+          s+=adv();
+          if(src[i]==='+'||src[i]==='-') s+=adv();
+          while(i<n && src[i]>='0'&&src[i]<='9') s+=adv();
+        }
+      }
+      tokens.push({t:TK_NUMBER, v:parseFloat(s.replace(/_/g,''))});
+      continue;
+    }
+    // name / keyword
+    if(/[a-zA-Z_]/.test(src[i])){
+      let s='';
+      while(i<n && /[a-zA-Z0-9_]/.test(src[i])) s+=adv();
+      if(KEYWORDS.has(s)) tokens.push({t:s});
+      else tokens.push({t:TK_NAME, v:s});
+      continue;
+    }
+    // operators
+    const c1=src[i], c2=src[i+1], c3=src[i+2];
+    if(c1==='.'&&c2==='.'&&c3==='.'){ tokens.push({t:TK_OP,v:'...'}); i+=3; continue; }
+    const two=c1+c2;
+    if(['==','~=','<=','>=','..','//','>>','<<','::'].includes(two)){ tokens.push({t:TK_OP,v:two}); i+=2; continue; }
+    if('+-*/%^#&|~<>=(){}[];:,.'.includes(c1)){ tokens.push({t:TK_OP,v:c1}); i++; continue; }
+    i++;
+  }
+  tokens.push({t:TK_EOF});
+  return tokens;
+}
+
+// ─── PARSER ───────────────────────────────────────────────────────────────────
+function parse(tokens){
+  let pos = 0;
+  function cur(){ return tokens[pos]; }
+  function peek(off){ return tokens[pos+(off||0)]; }
+  function adv(){ return tokens[pos++]; }
+  function expect(t,v){
+    const tk=adv();
+    if(v!==undefined && tk.v!==v && tk.t!==v) throw new Error("Expected '"+v+"' got '"+(tk.v||tk.t)+"'");
+    if(v===undefined && tk.t!==t) throw new Error("Expected type "+t+" got "+tk.t);
+    return tk;
+  }
+  function check(t,v){
+    const tk=cur();
+    if(v!==undefined) return tk.v===v || tk.t===v;
+    return tk.t===t || tk.v===t;
+  }
+  function match_(t,v){
+    if(check(t,v)){ adv(); return true; }
+    return false;
+  }
+
+  function parseBlock(){
+    const stmts=[];
+    while(true){
+      const tk=cur();
+      if(tk.t===TK_EOF||tk.t==='end'||tk.t==='else'||tk.t==='elseif'||tk.t==='until') break;
+      if(tk.t==='return'){ stmts.push(parseReturn()); match_(TK_OP,';'); break; }
+      const s=parseStatement();
+      if(s) stmts.push(s);
+      match_(TK_OP,';');
+    }
+    return {k:'block',body:stmts};
+  }
+
+  function parseReturn(){
+    adv();
+    const vals=[];
+    const tk=cur();
+    if(tk.t!==TK_EOF&&tk.t!=='end'&&tk.t!=='else'&&tk.t!=='elseif'&&tk.t!=='until'&&!(tk.t===TK_OP&&tk.v===';')){
+      vals.push(parseExpr());
+      while(match_(TK_OP,',')) vals.push(parseExpr());
+    }
+    return {k:'return',vals};
+  }
+
+  function parseStatement(){
+    const tk=cur();
+    if(tk.t===TK_OP&&tk.v===';'){ adv(); return null; }
+    if(tk.t==='do'){ adv(); const b=parseBlock(); expect('end'); return {k:'do',body:b}; }
+    if(tk.t==='while') return parseWhile();
+    if(tk.t==='repeat') return parseRepeat();
+    if(tk.t==='if') return parseIf();
+    if(tk.t==='for') return parseFor();
+    if(tk.t==='function') return parseFuncDef();
+    if(tk.t==='local') return parseLocal();
+    if(tk.t==='goto'){ adv(); return {k:'goto',name:expect(TK_NAME).v}; }
+    if(tk.t==='break'){ adv(); return {k:'break'}; }
+    if(tk.t==='continue'){ adv(); return {k:'continue'}; }
+    if(tk.t===TK_OP&&tk.v==='::'){ adv(); const name=expect(TK_NAME).v; expect(TK_OP,'::'); return {k:'label',name}; }
+    return parseExprStat();
+  }
+
+  function parseWhile(){
+    adv();
+    const cond=parseExpr(); expect('do');
+    const body=parseBlock(); expect('end');
+    return {k:'while',cond,body};
+  }
+  function parseRepeat(){
+    adv();
+    const body=parseBlock(); expect('until');
+    const cond=parseExpr();
+    return {k:'repeat',body,cond};
+  }
+  function parseIf(){
+    adv();
+    const cond=parseExpr(); expect('then');
+    const then_=parseBlock();
+    const elseifs=[];
+    let else_=null;
+    while(check('elseif')){ adv(); const c=parseExpr(); expect('then'); elseifs.push({cond:c,body:parseBlock()}); }
+    if(match_('else')) else_=parseBlock();
+    expect('end');
+    return {k:'if',cond,then:then_,elseifs,else_};
+  }
+  function parseFor(){
+    adv();
+    const name=expect(TK_NAME).v;
+    if(match_(TK_OP,'=')){
+      const start=parseExpr(); expect(TK_OP,',');
+      const limit=parseExpr();
+      const step=match_(TK_OP,',') ? parseExpr() : null;
+      expect('do'); const body=parseBlock(); expect('end');
+      return {k:'numfor',name,start,limit,step,body};
+    } else {
+      const names=[name];
+      while(match_(TK_OP,',')) names.push(expect(TK_NAME).v);
+      expect('in');
+      const iters=[parseExpr()];
+      while(match_(TK_OP,',')) iters.push(parseExpr());
+      expect('do'); const body=parseBlock(); expect('end');
+      return {k:'genfor',names,iters,body};
+    }
+  }
+  function parseFuncDef(){
+    adv();
+    let base={k:'name',n:expect(TK_NAME).v};
+    let method=false;
+    while(match_(TK_OP,'.')) base={k:'field',obj:base,f:expect(TK_NAME).v};
+    if(match_(TK_OP,':')){ base={k:'field',obj:base,f:expect(TK_NAME).v}; method=true; }
+    return {k:'funcdef',target:base,func:parseFuncBody(method)};
+  }
+  function parseLocal(){
+    adv();
+    if(match_('function')){
+      const name=expect(TK_NAME).v;
+      return {k:'localfunc',name,func:parseFuncBody(false)};
+    }
+    const names=[expect(TK_NAME).v];
+    // skip <attr>
+    if(cur().t===TK_OP&&cur().v==='<'){ adv(); adv(); expect(TK_OP,'>'); }
+    while(match_(TK_OP,',')){
+      names.push(expect(TK_NAME).v);
+      if(cur().t===TK_OP&&cur().v==='<'){ adv(); adv(); expect(TK_OP,'>'); }
+    }
+    let vals=[];
+    if(match_(TK_OP,'=')){
+      vals.push(parseExpr());
+      while(match_(TK_OP,',')) vals.push(parseExpr());
+    }
+    return {k:'local',names,vals};
+  }
+  function parseFuncBody(method){
+    expect(TK_OP,'(');
+    const params=[];
+    let vararg=false;
+    if(method) params.push('self');
+    if(!check(TK_OP,')')){
+      if(check(TK_OP,'...')){ adv(); vararg=true; }
+      else {
+        params.push(expect(TK_NAME).v);
+        while(match_(TK_OP,',')){
+          if(check(TK_OP,'...')){ adv(); vararg=true; break; }
+          params.push(expect(TK_NAME).v);
+        }
+      }
+    }
+    expect(TK_OP,')');
+    const body=parseBlock(); expect('end');
+    return {k:'func',params,vararg,body};
+  }
+  function parseExprStat(){
+    const e=parseSuffixedExpr();
+    if(check(TK_OP,',') || check(TK_OP,'=')){
+      const targets=[e];
+      while(match_(TK_OP,',')) targets.push(parseSuffixedExpr());
+      expect(TK_OP,'=');
+      const vals=[parseExpr()];
+      while(match_(TK_OP,',')) vals.push(parseExpr());
+      return {k:'assign',targets,vals};
+    }
+    if(e.k==='call'||e.k==='callm') return {k:'callstat',e};
+    throw new Error('Unexpected expression statement: '+e.k);
+  }
+
+  function parseExpr(){ return parseOr(); }
+  function parseOr(){
+    let e=parseAnd();
+    while(check('or')){ adv(); e={k:'binop',op:'or',l:e,r:parseAnd()}; }
+    return e;
+  }
+  function parseAnd(){
+    let e=parseCmp();
+    while(check('and')){ adv(); e={k:'binop',op:'and',l:e,r:parseCmp()}; }
+    return e;
+  }
+  function parseCmp(){
+    let e=parseBitOr();
+    while(cur().t===TK_OP && ['<','>','<=','>=','==','~='].includes(cur().v)){ const op=adv().v; e={k:'binop',op,l:e,r:parseBitOr()}; }
+    return e;
+  }
+  function parseBitOr(){
+    let e=parseBitXor();
+    while(cur().t===TK_OP && cur().v==='|'){ adv(); e={k:'binop',op:'|',l:e,r:parseBitXor()}; }
+    return e;
+  }
+  function parseBitXor(){
+    let e=parseBitAnd();
+    while(cur().t===TK_OP && cur().v==='~'&&peek(1)&&peek(1).t===TK_OP){ adv(); e={k:'binop',op:'~',l:e,r:parseBitAnd()}; }
+    return e;
+  }
+  function parseBitAnd(){
+    let e=parseBitShift();
+    while(cur().t===TK_OP && cur().v==='&'){ adv(); e={k:'binop',op:'&',l:e,r:parseBitShift()}; }
+    return e;
+  }
+  function parseBitShift(){
+    let e=parseConcat();
+    while(cur().t===TK_OP && (cur().v==='>>'||cur().v==='<<')){ const op=adv().v; e={k:'binop',op,l:e,r:parseConcat()}; }
+    return e;
+  }
+  function parseConcat(){
+    const e=parseAdd();
+    if(cur().t===TK_OP && cur().v==='..'){ adv(); return {k:'binop',op:'..',l:e,r:parseConcat()}; }
+    return e;
+  }
+  function parseAdd(){
+    let e=parseMul();
+    while(cur().t===TK_OP && (cur().v==='+'||cur().v==='-')){ const op=adv().v; e={k:'binop',op,l:e,r:parseMul()}; }
+    return e;
+  }
+  function parseMul(){
+    let e=parseUnary();
+    while(cur().t===TK_OP && ['*','/','%','//'].includes(cur().v)){ const op=adv().v; e={k:'binop',op,l:e,r:parseUnary()}; }
+    return e;
+  }
+  function parseUnary(){
+    if(cur().t==='not'){ adv(); return {k:'unop',op:'not',e:parseUnary()}; }
+    if(cur().t===TK_OP && cur().v==='-'){ adv(); return {k:'unop',op:'-',e:parseUnary()}; }
+    if(cur().t===TK_OP && cur().v==='#'){ adv(); return {k:'unop',op:'#',e:parseUnary()}; }
+    if(cur().t===TK_OP && cur().v==='~'){ adv(); return {k:'unop',op:'~',e:parseUnary()}; }
+    return parsePower();
+  }
+  function parsePower(){
+    const e=parseSuffixedExpr();
+    if(cur().t===TK_OP && cur().v==='^'){ adv(); return {k:'binop',op:'^',l:e,r:parseUnary()}; }
+    return e;
+  }
+  function parseSuffixedExpr(){
+    let e=parsePrimaryExpr();
+    while(true){
+      if(cur().v==='.'){ adv(); e={k:'field',obj:e,f:expect(TK_NAME).v}; }
+      else if(cur().v==='['){ adv(); const idx=parseExpr(); expect(TK_OP,']'); e={k:'index',obj:e,idx}; }
+      else if(cur().v===':'){ adv(); const m=expect(TK_NAME).v; e={k:'callm',obj:e,m,args:parseCallArgs()}; }
+      else if(cur().v==='('||cur().t===TK_STRING||cur().v==='{'){ e={k:'call',f:e,args:parseCallArgs()}; }
+      else break;
+    }
+    return e;
+  }
+  function parseCallArgs(){
+    if(cur().v==='('){
+      adv();
+      const args=[];
+      if(!check(TK_OP,')')){
+        args.push(parseExpr());
+        while(match_(TK_OP,',')) args.push(parseExpr());
+      }
+      expect(TK_OP,')'); return args;
+    }
+    if(cur().t===TK_STRING){ return [{k:'str',v:adv().v}]; }
+    if(cur().v==='{'){ return [parseTableConstructor()]; }
+    throw new Error('Expected call args');
+  }
+  function parsePrimaryExpr(){
+    const tk=cur();
+    if(tk.t===TK_NAME){ adv(); return {k:'name',n:tk.v}; }
+    if(tk.v==='('){ adv(); const e=parseExpr(); expect(TK_OP,')'); return {k:'paren',e}; }
+    return parseSimpleExpr();
+  }
+  function parseSimpleExpr(){
+    const tk=cur();
+    if(tk.t===TK_NUMBER){ adv(); return {k:'num',v:tk.v}; }
+    if(tk.t===TK_STRING){ adv(); return {k:'str',v:tk.v}; }
+    if(tk.t==='nil'){ adv(); return {k:'nil'}; }
+    if(tk.t==='true'){ adv(); return {k:'true'}; }
+    if(tk.t==='false'){ adv(); return {k:'false'}; }
+    if(tk.v==='...'){ adv(); return {k:'vararg'}; }
+    if(tk.t==='function'){ adv(); return parseFuncBody(false); }
+    if(tk.v==='{'){ return parseTableConstructor(); }
+    const _ctx=tokens.slice(Math.max(0,pos-4),pos+4).map(function(t){return t.v||t.t;}).join(' ');
+    throw new Error('Unexpected token: '+(tk.v||tk.t)+' near ['+_ctx+']');
+  }
+  function parseTableConstructor(){
+    expect(TK_OP,'{');
+    const fields=[];
+    while(!check(TK_OP,'}')){
+      if(cur().v==='['){
+        adv(); const key=parseExpr(); expect(TK_OP,']'); expect(TK_OP,'=');
+        fields.push({k:'kv',key,val:parseExpr()});
+      } else if(cur().t===TK_NAME && peek(1).v==='='){
+        const key=adv().v; adv();
+        fields.push({k:'nv',key,val:parseExpr()});
+      } else {
+        fields.push({k:'v',val:parseExpr()});
+      }
+      if(!match_(TK_OP,',') && !match_(TK_OP,';')) break;
+    }
+    expect(TK_OP,'}'); return {k:'tbl',fields};
+  }
+
+  return parseBlock();
+}
+
+// ─── OPCODE MAP ───────────────────────────────────────────────────────────────
+function genOpcodeMap(){
+  const nodeKinds=['nil','true','false','num','str','vararg','binop','unop',
+    'index','field','callm','call','func','tbl','name','paren',
+    'block','local','assign','do','while','repeat','if','numfor','genfor',
+    'funcdef','localfunc','return','break','continue','callstat','label','goto','kv','nv','v'];
+  const opKinds=['+','-','*','/','%','//','..','<','>','<=','>=','==','~=',
+    'and','or','^','&','|','~','>>','<<','not','#','-u','~u'];
+
+  function shuffled(max){
+    const a=[];
+    for(let i=1;i<=max;i++) a.push(i);
+    for(let i=a.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [a[i],a[j]]=[a[j],a[i]];
+    }
+    return a;
+  }
+  const pool=shuffled(nodeKinds.length+opKinds.length+30);
+  const NK={}, OK={};
+  nodeKinds.forEach((k,i)=>NK[k]=pool[i]);
+  opKinds.forEach((k,i)=>OK[k]=pool[nodeKinds.length+i]);
+  return {NK,OK};
+}
+
+// ─── AST SERIALIZER ───────────────────────────────────────────────────────────
+function serializeAST(ast, NK, OK){
+  // string deduplication table
+  const _strMap=new Map(), _strArr=[];
+  function encStr(s){
+    if(!_strMap.has(s)){ _strMap.set(s,_strArr.length+1); _strArr.push(s); }
+    return '_S['+_strMap.get(s)+']';
+  }
+  function encNum(n){
+    if(!isFinite(n)) return n>0?'(1/0)':'-(1/0)';
+    if(n===0) return '0';
+    const k=Math.floor(Math.random()*200)+50;
+    return '('+(n+k)+'-'+k+')';
+  }
+
+  function sExpr(e){
+    if(!e) return '{'+NK.nil+'}';
+    switch(e.k){
+      case 'nil':    return '{'+NK.nil+'}';
+      case 'true':   return '{'+NK.true+'}';
+      case 'false':  return '{'+NK.false+'}';
+      case 'num':    return '{'+NK.num+','+encNum(e.v)+'}';
+      case 'str':    return '{'+NK.str+','+encStr(e.v)+'}';
+      case 'vararg': return '{'+NK.vararg+'}';
+      case 'paren':  return '{'+NK.paren+','+sExpr(e.e)+'}';
+      case 'name':   return '{'+NK.name+','+encStr(e.n)+'}';
+      case 'field':  return '{'+NK.field+','+sExpr(e.obj)+','+encStr(e.f)+'}';
+      case 'index':  return '{'+NK.index+','+sExpr(e.obj)+','+sExpr(e.idx)+'}';
+      case 'binop':  return '{'+NK.binop+','+(OK[e.op]||0)+','+sExpr(e.l)+','+sExpr(e.r)+'}';
+      case 'unop': {
+        const uop = e.op==='-' ? '-u' : e.op==='~' ? '~u' : e.op;
+        return '{'+NK.unop+','+(OK[uop]||0)+','+sExpr(e.e)+'}';
+      }
+      case 'call':   return '{'+NK.call+','+sExpr(e.f)+',{'+e.args.map(sExpr).join(',')+'}}';
+      case 'callm':  return '{'+NK.callm+','+sExpr(e.obj)+','+encStr(e.m)+',{'+e.args.map(sExpr).join(',')+'}}';;
+      case 'func':   return sFunc(e);
+      case 'tbl':    return '{'+NK.tbl+',{'+e.fields.map(sField).join(',')+'}}';
+      default: return '{'+NK.nil+'}';
+    }
+  }
+  function sField(f){
+    if(f.k==='kv') return '{'+NK.kv+','+sExpr(f.key)+','+sExpr(f.val)+'}';
+    if(f.k==='nv') return '{'+NK.nv+','+encStr(f.key)+','+sExpr(f.val)+'}';
+    return '{'+NK.v+','+sExpr(f.val)+'}';
+  }
+  function sFunc(fn){
+    return '{'+NK.func+',{'+fn.params.map(encStr).join(',')+'}'
+      +','+( fn.vararg?'true':'false')+','+sBlock(fn.body)+'}';
+  }
+  function sBlock(b){
+    return '{'+NK.block+',{'+b.body.map(sStmt).join(',')+'}}';
+  }
+  function sStmt(s){
+    if(!s) return '{'+NK.nil+'}';
+    switch(s.k){
+      case 'local':     return '{'+NK.local+',{'+s.names.map(encStr).join(',')+'},{'+s.vals.map(sExpr).join(',')+'}}';;
+      case 'assign':    return '{'+NK.assign+',{'+s.targets.map(sExpr).join(',')+'},{'+s.vals.map(sExpr).join(',')+'}}';;
+      case 'do':        return '{'+NK.do+','+sBlock(s.body)+'}';
+      case 'while':     return '{'+NK.while+','+sExpr(s.cond)+','+sBlock(s.body)+'}';
+      case 'repeat':    return '{'+NK.repeat+','+sBlock(s.body)+','+sExpr(s.cond)+'}';
+      case 'if':        return sIf(s);
+      case 'numfor':    return '{'+NK.numfor+','+encStr(s.name)+','+sExpr(s.start)+','+sExpr(s.limit)
+                          +','+(s.step?sExpr(s.step):'false')+','+sBlock(s.body)+'}';
+      case 'genfor':    return '{'+NK.genfor+',{'+s.names.map(encStr).join(',')+'},{'+s.iters.map(sExpr).join(',')+'}'
+                          +','+sBlock(s.body)+'}';
+      case 'funcdef':   return '{'+NK.funcdef+','+sExpr(s.target)+','+sExpr(s.func)+'}';
+      case 'localfunc': return '{'+NK.localfunc+','+encStr(s.name)+','+sExpr(s.func)+'}';
+      case 'return':    return '{'+NK.return+',{'+s.vals.map(sExpr).join(',')+'}}';
+      case 'break':     return '{'+NK.break+'}';
+      case 'continue':  return '{'+NK.continue+'}';
+      case 'callstat':  return '{'+NK.callstat+','+sExpr(s.e)+'}';
+      case 'label':     return '{'+NK.label+','+encStr(s.name)+'}';
+      case 'goto':      return '{'+NK.goto+','+encStr(s.name)+'}';
+      default: return '{'+NK.nil+'}';
+    }
+  }
+  function sIf(s){
+    const eis='{'+s.elseifs.map(function(ei){ return '{'+sExpr(ei.cond)+','+sBlock(ei.body)+'}'; }).join(',')+'}';
+    const el=s.else_?sBlock(s.else_):'false';
+    return '{'+NK.if+','+sExpr(s.cond)+','+sBlock(s.then)+','+eis+','+el+'}';
+  }
+  const astStr=sBlock(ast);
+  return {astStr, strArr:_strArr};
+}
+
+// ─── VM GENERATOR ─────────────────────────────────────────────────────────────
+function generateVM(NK, OK, astStr, strArr){
+  // unique obfuscated name per semantic role
+  const _usedNames=new Set();
+  function rn(){
+    const pool='lLiI1';
+    let s;
+    do {
+      s='_';
+      const len=5+Math.floor(Math.random()*5);
+      for(let i=0;i<len;i++) s+=pool[Math.floor(Math.random()*pool.length)];
+    } while(_usedNames.has(s));
+    _usedNames.add(s);
+    return s;
+  }
+  // name registry — every key gets a unique random name
+  const R={};
+  [
+    'NK','OK','MRET','CF0','CF1','CF2','CF3','CF4',
+    'makeEnv','evalExpr','evalBlock','getVar','setVar',
+    'AST','genv',
+    // function parameters and common temps
+    'n','env','k','v','t','p','up',
+    // evalExpr temps
+    'op','nk','obj','idx','fldNode','fldKind','r','ai',
+    // evalBlock temps
+    'stmts','labels','si','s','sk',
+    // func body temps
+    'params','isVA','body','capEnv','fenv','fargs','sig','vals','va',
+    // call temps
+    'fn','as','rv','mt',
+    // assign/local temps
+    'tgts','vs','ev','j','tg','tnk','to','tk2',
+    // loop temps
+    'nm','fi','sp','lm','iterF','iterS','iterV','res','ge',
+    // if/while/do temps
+    'ie','we','de','re','taken','ei',
+    // goto/label
+    'lbl',
+    'S','ES','EKA','EKB','dI','dJ','dR','ki'
+  ].forEach(function(name){ R[name]=rn(); });
+
+  const G=R; // alias
+
+  // String encryption: XOR with 16-byte key split across two arrays
+  const KEY_LEN=16;
+  const masterKey=Array.from({length:KEY_LEN},function(){ return Math.floor(Math.random()*254)+1; });
+  const keyA=Array.from({length:KEY_LEN},function(){ return Math.floor(Math.random()*254)+1; });
+  const keyB=masterKey.map(function(b,i){ return b^keyA[i]; });
+  function encryptStr(s,idx){
+    const bytes=[];
+    for(let j=0;j<s.length;j++) bytes.push((s.charCodeAt(j)&0xFF)^masterKey[(idx+j)%KEY_LEN]);
+    return bytes;
+  }
+  function luaByteLiteral(bytes){
+    if(bytes.length===0) return '""';
+    return '"'+bytes.map(function(b){ return '\\'+b; }).join('')+'"';
+  }
+  const encStrs=strArr.map(function(s,i){ return luaByteLiteral(encryptStr(s,i+1)); });
+  const safeAstStr=astStr.replace(/_S\[/g,G.S+'[');
+  const setupLines=[
+    'local _GENV=getgenv and getgenv() or _G',
+    'local '+G.EKA+'={'+keyA.join(',')+'}',
+    'local '+G.EKB+'={'+keyB.join(',')+'}',
+    'local '+G.ES+'={'+encStrs.join(',')+'}',
+    'local '+G.S+'={}',
+    'for '+G.dI+'=1,#'+G.ES+' do',
+    '  local '+G.dR+'={}',
+    '  for '+G.dJ+'=1,#'+G.ES+'['+G.dI+'] do',
+    '    local '+G.ki+'=('+G.dI+'+'+G.dJ+'-1)%'+KEY_LEN+'+1',
+    '    '+G.dR+'['+G.dJ+']=string.char(bit32.bxor(string.byte('+G.ES+'['+G.dI+'],'+G.dJ+'),bit32.bxor('+G.EKA+'['+G.ki+'],'+G.EKB+'['+G.ki+'])))',
+    '  end',
+    '  '+G.S+'['+G.dI+']=table.concat('+G.dR+')',
+    'end',
+    G.EKA+'=nil '+G.EKB+'=nil '+G.ES+'=nil',
+  ];
+
+  const innerLines = [
+...setupLines,
+'local '+G.CF0+','+G.CF1+','+G.CF2+','+G.CF3+','+G.CF4+'=0,1,2,3,4',
+'local '+G.MRET+'={}',
+'local '+G.makeEnv+','+G.evalExpr+','+G.evalBlock+','+G.getVar+','+G.setVar,
+'',
+G.makeEnv+'=function('+G.p+','+G.up+')',
+'  return{_p='+G.p+',_up='+G.up+',_v={}}',
+'end',
+'',
+G.getVar+'=function('+G.env+','+G.k+')',
+'  local '+G.t+'='+G.env,
+'  while '+G.t+' do',
+'    if '+G.t+'._v['+G.k+']~=nil then return '+G.t+'._v['+G.k+'] end',
+'    '+G.t+'='+G.t+'._p',
+'  end',
+'  return _GENV['+G.k+']',
+'end',
+'',
+G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
+'  local '+G.t+'='+G.env,
+'  while '+G.t+' do',
+'    if '+G.t+'._v['+G.k+']~=nil then '+G.t+'._v['+G.k+']='+G.v+' return end',
+'    '+G.t+'='+G.t+'._p',
+'  end',
+'  _GENV['+G.k+']='+G.v,
+'end',
+'',
+G.evalExpr+'=function('+G.n+','+G.env+')',
+'  local '+G.op+'='+G.n+'[1]',
+'  local '+G.nk+'='+G.op,
+'  if '+G.nk+'=='+NK['nil']+' then return nil',
+'  elseif '+G.nk+'=='+NK['true']+' then return true',
+'  elseif '+G.nk+'=='+NK['false']+' then return false',
+'  elseif '+G.nk+'=='+NK['num']+' then return '+G.n+'[2]',
+'  elseif '+G.nk+'=='+NK['str']+' then return '+G.n+'[2]',
+'  elseif '+G.nk+'=='+NK['vararg']+' then return table.unpack('+G.env+'._v.__vararg or {})',
+'  elseif '+G.nk+'=='+NK['paren']+' then',
+'    local '+G.v+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
+'    if type('+G.v+')=="table" and getmetatable('+G.v+')=='+G.MRET+' then return '+G.v+'[1] end',
+'    return '+G.v,
+'  elseif '+G.nk+'=='+NK['name']+' then',
+'    return '+G.getVar+'('+G.env+','+G.n+'[2])',
+'  elseif '+G.nk+'=='+NK['field']+' then',
+'    local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
+'    if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end',
+'    return '+G.obj+'['+G.n+'[3]]',
+'  elseif '+G.nk+'=='+NK['index']+' then',
+'    local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
+'    if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end',
+'    local '+G.idx+'='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
+'    return '+G.obj+'['+G.idx+']',
+'  elseif '+G.nk+'=='+NK['tbl']+' then',
+'    local '+G.r+'={} local '+G.ai+'=1',
+'    for _,'+G.fldNode+' in ipairs('+G.n+'[2]) do',
+'      local '+G.fldKind+'='+G.fldNode+'[1]',
+'      if '+G.fldKind+'=='+NK['kv']+' then',
+'        '+G.r+'['+G.evalExpr+'('+G.fldNode+'[2],'+G.env+')]='+G.evalExpr+'('+G.fldNode+'[3],'+G.env+')',
+'      elseif '+G.fldKind+'=='+NK['nv']+' then',
+'        '+G.r+'['+G.fldNode+'[2]]='+G.evalExpr+'('+G.fldNode+'[3],'+G.env+')',
+'      else',
+'        local '+G.v+'='+G.evalExpr+'('+G.fldNode+'[2],'+G.env+')',
+'        if type('+G.v+')=="table" and getmetatable('+G.v+')=='+G.MRET+' then',
+'          for _,_x in ipairs('+G.v+') do '+G.r+'['+G.ai+']=_x '+G.ai+'='+G.ai+'+1 end',
+'        else '+G.r+'['+G.ai+']='+G.v+' '+G.ai+'='+G.ai+'+1 end',
+'      end',
+'    end',
+'    return '+G.r,
+'  elseif '+G.nk+'=='+NK['func']+' then',
+'    local '+G.params+','+G.isVA+','+G.body+'='+G.n+'[2],'+G.n+'[3],'+G.n+'[4]',
+'    local '+G.capEnv+'='+G.env,
+'    return function(...)',
+'      local '+G.fargs+'={...}',
+'      local '+G.fenv+'='+G.makeEnv+'('+G.capEnv+',nil)',
+'      for _i,_pn in ipairs('+G.params+') do '+G.fenv+'._v[_pn]='+G.fargs+'[_i] end',
+'      if '+G.isVA+' then',
+'        local '+G.va+'={}',
+'        for _i=#'+G.params+'+1,#'+G.fargs+' do '+G.va+'[#'+G.va+'+1]='+G.fargs+'[_i] end',
+'        '+G.fenv+'._v.__vararg='+G.va,
+'      end',
+'      local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.body+','+G.fenv+')',
+'      if '+G.sig+'=='+G.CF2+' then',
+'        if type('+G.vals+')=="table" and #'+G.vals+'>0 then return table.unpack('+G.vals+') end',
+'      end',
+'    end',
+'  elseif '+G.nk+'=='+NK['call']+' then',
+'    local '+G.fn+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
+'    local '+G.as+'={}',
+'    for _i,_a in ipairs('+G.n+'[3]) do',
+'      if _i==#'+G.n+'[3] then',
+'        local _lv='+G.evalExpr+'(_a,'+G.env+')',
+'        if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
+'          for _,_x in ipairs(_lv) do '+G.as+'[#'+G.as+'+1]=_x end',
+'        else '+G.as+'[#'+G.as+'+1]=_lv end',
+'      else '+G.as+'[#'+G.as+'+1]='+G.evalExpr+'(_a,'+G.env+') end',
+'    end',
+'    local '+G.rv+'=table.pack(pcall('+G.fn+',table.unpack('+G.as+')))',
+'    if not '+G.rv+'[1] then error('+G.rv+'[2],0) end',
+'    if '+G.rv+'.n>2 then',
+'      local '+G.mt+'=setmetatable({},'+G.MRET+')',
+'      for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end',
+'      return '+G.mt,
+'    end',
+'    return '+G.rv+'[2]',
+'  elseif '+G.nk+'=='+NK['callm']+' then',
+'    local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
+'    if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end',
+'    local '+G.fn+'='+G.obj+'['+G.n+'[3]]',
+'    local '+G.as+'={'+G.obj+'}',
+'    for _i,_a in ipairs('+G.n+'[4]) do',
+'      if _i==#'+G.n+'[4] then',
+'        local _lv='+G.evalExpr+'(_a,'+G.env+')',
+'        if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
+'          for _,_x in ipairs(_lv) do '+G.as+'[#'+G.as+'+1]=_x end',
+'        else '+G.as+'[#'+G.as+'+1]=_lv end',
+'      else '+G.as+'[#'+G.as+'+1]='+G.evalExpr+'(_a,'+G.env+') end',
+'    end',
+'    local '+G.rv+'=table.pack(pcall('+G.fn+',table.unpack('+G.as+')))',
+'    if not '+G.rv+'[1] then error('+G.rv+'[2],0) end',
+'    if '+G.rv+'.n>2 then',
+'      local '+G.mt+'=setmetatable({},'+G.MRET+')',
+'      for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end',
+'      return '+G.mt,
+'    end',
+'    return '+G.rv+'[2]',
+'  elseif '+G.nk+'=='+NK['binop']+' then',
+'    local _bop='+G.n+'[2]',
+'    if _bop=='+OK['and']+' then',
+'      local _lv='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
+'      if not _lv then return _lv end',
+'      return '+G.evalExpr+'('+G.n+'[4],'+G.env+')',
+'    elseif _bop=='+OK['or']+' then',
+'      local _lv='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
+'      if _lv then return _lv end',
+'      return '+G.evalExpr+'('+G.n+'[4],'+G.env+')',
+'    end',
+'    local _l='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
+'    local _r='+G.evalExpr+'('+G.n+'[4],'+G.env+')',
+'    if type(_l)=="table" and getmetatable(_l)=='+G.MRET+' then _l=_l[1] end',
+'    if type(_r)=="table" and getmetatable(_r)=='+G.MRET+' then _r=_r[1] end',
+'    if _bop=='+OK['+']+' then return _l+_r',
+'    elseif _bop=='+OK['-']+' then return _l-_r',
+'    elseif _bop=='+OK['*']+' then return _l*_r',
+'    elseif _bop=='+OK['/']+' then return _l/_r',
+'    elseif _bop=='+OK['%']+' then return _l%_r',
+'    elseif _bop=='+OK['..']+' then return tostring(_l)..tostring(_r)',
+'    elseif _bop=='+OK['^']+' then return _l^_r',
+'    elseif _bop=='+OK['<']+' then return _l<_r',
+'    elseif _bop=='+OK['>']+' then return _l>_r',
+'    elseif _bop=='+OK['<=']+' then return _l<=_r',
+'    elseif _bop=='+OK['>=']+' then return _l>=_r',
+'    elseif _bop=='+OK['==']+' then return _l==_r',
+'    elseif _bop=='+OK['~=']+' then return _l~=_r',
+'    elseif _bop=='+OK['//']+' then return math.floor(_l/_r)',
+'    elseif _bop=='+OK['&']+' then return bit32.band(_l,_r)',
+'    elseif _bop=='+OK['|']+' then return bit32.bor(_l,_r)',
+'    elseif _bop=='+OK['~']+' then return bit32.bxor(_l,_r)',
+'    elseif _bop=='+OK['>>']+' then return bit32.rshift(_l,_r)',
+'    elseif _bop=='+OK['<<']+' then return bit32.lshift(_l,_r)',
+'    end',
+'  elseif '+G.nk+'=='+NK['unop']+' then',
+'    local _uop='+G.n+'[2]',
+'    local _v='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
+'    if type(_v)=="table" and getmetatable(_v)=='+G.MRET+' then _v=_v[1] end',
+'    if _uop=='+OK['not']+' then return not _v',
+'    elseif _uop=='+OK['-u']+' then return -_v',
+'    elseif _uop=='+OK['#']+' then return #_v',
+'    elseif _uop=='+OK['~u']+' then return bit32.bnot(_v)',
+'    end',
+'  end',
+'  return nil',
+'end',
+'',
+G.evalBlock+'=function('+G.n+','+G.env+')',
+'  local '+G.stmts+'='+G.n+'[2]',
+'  local '+G.labels+'={}',
+'  for _,'+G.s+' in ipairs('+G.stmts+') do',
+'    if '+G.s+'[1]=='+NK['label']+' then '+G.labels+'['+G.s+'[2]]=_ end',
+'  end',
+'  local '+G.si+'=1',
+'  while '+G.si+'<=#'+G.stmts+' do',
+'    local '+G.s+'='+G.stmts+'['+G.si+']',
+'    local '+G.sk+'='+G.s+'[1]',
+'    local _j=true',
+'    if '+G.sk+'=='+NK['callstat']+' then',
+'      '+G.evalExpr+'('+G.s+'[2],'+G.env+')',
+'    elseif '+G.sk+'=='+NK['local']+' then',
+'      local '+G.ev+'={}',
+'      for '+G.j+',_vn in ipairs('+G.s+'[3]) do',
+'        if '+G.j+'==#'+G.s+'[3] then',
+'          local _lv='+G.evalExpr+'(_vn,'+G.env+')',
+'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
+'            for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end',
+'          else '+G.ev+'[#'+G.ev+'+1]=_lv end',
+'        else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_vn,'+G.env+') end',
+'      end',
+'      for '+G.j+','+G.nm+' in ipairs('+G.s+'[2]) do '+G.env+'._v['+G.nm+']='+G.ev+'['+G.j+'] end',
+'    elseif '+G.sk+'=='+NK['assign']+' then',
+'      local '+G.ev+'={}',
+'      for '+G.j+',_vn in ipairs('+G.s+'[3]) do',
+'        if '+G.j+'==#'+G.s+'[3] then',
+'          local _lv='+G.evalExpr+'(_vn,'+G.env+')',
+'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
+'            for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end',
+'          else '+G.ev+'[#'+G.ev+'+1]=_lv end',
+'        else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_vn,'+G.env+') end',
+'      end',
+'      for '+G.j+','+G.tg+' in ipairs('+G.s+'[2]) do',
+'        local '+G.tnk+'='+G.tg+'[1]',
+'        if '+G.tnk+'=='+NK['name']+' then',
+'          '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.ev+'['+G.j+'])',
+'        elseif '+G.tnk+'=='+NK['field']+' then',
+'          local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')',
+'          '+G.to+'['+G.tg+'[3]]='+G.ev+'['+G.j+']',
+'        elseif '+G.tnk+'=='+NK['index']+' then',
+'          local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')',
+'          local '+G.tk2+'='+G.evalExpr+'('+G.tg+'[3],'+G.env+')',
+'          '+G.to+'['+G.tk2+']='+G.ev+'['+G.j+']',
+'        end',
+'      end',
+'    elseif '+G.sk+'=='+NK['do']+' then',
+'      local '+G.de+'='+G.makeEnv+'('+G.env+',nil)',
+'      local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[2],'+G.de+')',
+'      if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
+'    elseif '+G.sk+'=='+NK['while']+' then',
+'      while '+G.evalExpr+'('+G.s+'[2],'+G.env+') do',
+'        local '+G.we+'='+G.makeEnv+'('+G.env+',nil)',
+'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[3],'+G.we+')',
+'        if '+G.sig+'=='+G.CF1+' then break end',
+'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
+'        if '+G.sig+'=='+G.CF3+' then',
+'          if '+G.labels+'['+G.vals+'] then '+G.si+'='+G.labels+'['+G.vals+'] break',
+'          else return '+G.sig+','+G.vals+' end',
+'        end',
+'      end',
+'    elseif '+G.sk+'=='+NK['repeat']+' then',
+'      repeat',
+'        local '+G.re+'='+G.makeEnv+'('+G.env+',nil)',
+'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[2],'+G.re+')',
+'        if '+G.sig+'=='+G.CF1+' then break end',
+'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
+'        if '+G.evalExpr+'('+G.s+'[3],'+G.re+') then break end',
+'      until false',
+'    elseif '+G.sk+'=='+NK['if']+' then',
+'      local '+G.taken+'=false',
+'      if '+G.evalExpr+'('+G.s+'[2],'+G.env+') then',
+'        '+G.taken+'=true',
+'        local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)',
+'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[3],'+G.ie+')',
+'        if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
+'      else',
+'        for _,'+G.ei+' in ipairs('+G.s+'[4]) do',
+'          if '+G.evalExpr+'('+G.ei+'[1],'+G.env+') then',
+'            '+G.taken+'=true',
+'            local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)',
+'            local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.ei+'[2],'+G.ie+')',
+'            if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
+'            break',
+'          end',
+'        end',
+'      end',
+'      if not '+G.taken+' and '+G.s+'[5] then',
+'        local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)',
+'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[5],'+G.ie+')',
+'        if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
+'      end',
+'    elseif '+G.sk+'=='+NK['numfor']+' then',
+'      local '+G.nm+'='+G.s+'[2]',
+'      local '+G.fi+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')',
+'      local '+G.lm+'='+G.evalExpr+'('+G.s+'[4],'+G.env+')',
+'      local '+G.sp+'='+G.s+'[5] and '+G.evalExpr+'('+G.s+'[5],'+G.env+') or 1',
+'      while ('+G.sp+'>0 and '+G.fi+'<='+G.lm+') or ('+G.sp+'<0 and '+G.fi+'>='+G.lm+') do',
+'        local '+G.ge+'='+G.makeEnv+'('+G.env+',nil)',
+'        '+G.ge+'._v['+G.nm+']='+G.fi,
+'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[6],'+G.ge+')',
+'        if '+G.sig+'=='+G.CF1+' then break end',
+'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
+'        '+G.fi+'='+G.fi+'+'+G.sp,
+'      end',
+'    elseif '+G.sk+'=='+NK['genfor']+' then',
+'      local '+G.ev+'={}',
+'      for '+G.j+',_it in ipairs('+G.s+'[3]) do',
+'        if '+G.j+'==#'+G.s+'[3] then',
+'          local _lv='+G.evalExpr+'(_it,'+G.env+')',
+'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
+'            for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end',
+'          else '+G.ev+'[#'+G.ev+'+1]=_lv end',
+'        else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_it,'+G.env+') end',
+'      end',
+'      local '+G.iterF+'='+G.ev+'[1] local '+G.iterS+'='+G.ev+'[2] local '+G.iterV+'='+G.ev+'[3]',
+'      while true do',
+'        local '+G.res+'=table.pack('+G.iterF+'('+G.iterS+','+G.iterV+'))',
+'        if '+G.res+'[1]==nil then break end',
+'        '+G.iterV+'='+G.res+'[1]',
+'        local '+G.ge+'='+G.makeEnv+'('+G.env+',nil)',
+'        for '+G.j+','+G.nm+' in ipairs('+G.s+'[2]) do '+G.ge+'._v['+G.nm+']='+G.res+'['+G.j+'] end',
+'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[4],'+G.ge+')',
+'        if '+G.sig+'=='+G.CF1+' then break end',
+'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
+'      end',
+'    elseif '+G.sk+'=='+NK['return']+' then',
+'      local '+G.ev+'={}',
+'      for '+G.j+',_rv in ipairs('+G.s+'[2]) do',
+'        if '+G.j+'==#'+G.s+'[2] then',
+'          local _lv='+G.evalExpr+'(_rv,'+G.env+')',
+'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
+'            for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end',
+'          else '+G.ev+'[#'+G.ev+'+1]=_lv end',
+'        else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_rv,'+G.env+') end',
+'      end',
+'      return '+G.CF2+','+G.ev,
+'    elseif '+G.sk+'=='+NK['break']+' then',
+'      return '+G.CF1+',nil',
+'    elseif '+G.sk+'=='+NK['continue']+' then',
+'      return '+G.CF4+',nil',
+'    elseif '+G.sk+'=='+NK['funcdef']+' then',
+'      local '+G.fn+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')',
+'      local '+G.tg+'='+G.s+'[2]',
+'      local '+G.tnk+'='+G.tg+'[1]',
+'      if '+G.tnk+'=='+NK['name']+' then '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.fn+')',
+'      elseif '+G.tnk+'=='+NK['field']+' then',
+'        local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')',
+'        '+G.to+'['+G.tg+'[3]]='+G.fn,
+'      end',
+'    elseif '+G.sk+'=='+NK['localfunc']+' then',
+'      '+G.env+'._v['+G.s+'[2]]=nil',
+'      '+G.env+'._v['+G.s+'[2]]='+G.evalExpr+'('+G.s+'[3],'+G.env+')',
+'    elseif '+G.sk+'=='+NK['label']+' then',
+'      -- indexed above',
+'    elseif '+G.sk+'=='+NK['goto']+' then',
+'      if '+G.labels+'['+G.s+'[2]] then',
+'        '+G.si+'='+G.labels+'['+G.s+'[2]]+1 _j=false',
+'      else return '+G.CF3+','+G.s+'[2] end',
+'    end',
+'    if _j then '+G.si+'='+G.si+'+1 end',
+'  end',
+'  return '+G.CF0+',nil',
+'end',
+'',
+'local '+G.AST+'='+safeAstStr,
+'local '+G.genv+'={_p=nil,_up=nil,_v={}}',
+'local _vmOk,_vmErr=pcall('+G.evalBlock+','+G.AST+','+G.genv+')',
+'if not _vmOk then print("[VM ERROR] "..tostring(_vmErr)) end',
+'print("[VM] done")',
+  ].join('\n');
+
+  // Find safe long-string bracket level (avoid ]==...=] collision)
+  let lvl = 0;
+  while (innerLines.includes(']'+'='.repeat(lvl)+']')) lvl++;
+  const open  = '['+'='.repeat(lvl)+'[';
+  const close = ']'+'='.repeat(lvl)+']';
+
+  return [
+'print("[VM] start")',
+'local _ls=load or loadstring',
+'if not _ls then print("[VM] no loadstring") return end',
+'local _fn,_err=_ls('+open,
+innerLines,
+close+')',
+'if not _fn then print("[VM] compile: "..tostring(_err)) return end',
+'local _ok,_oe=pcall(_fn)',
+'if not _ok then print("[VM] runtime: "..tostring(_oe)) end',
+  ].join('\n');
+}
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
+function obfuscateVM(src){
+  const tokens = tokenize(src);
+  const ast    = parse(tokens);
+  const {NK,OK} = genOpcodeMap();
+  const {astStr,strArr} = serializeAST(ast, NK, OK);
+  return generateVM(NK, OK, astStr, strArr);
+}
+</script>
+</body>
+</html>
