@@ -727,8 +727,6 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
   const safeAstStr=astStr.replace(/_S\[/g,G.S+'[');
   const setupLines=[
     'local _GENV=getgenv and getgenv() or _G',
-    // Anti-tamper: verify critical builtins behave correctly
-    'do local _t={} local _ok=type(type)=="function" and type(rawget(_t,1))=="nil" and type(true)=="boolean" if not _ok then return end end',
     'local '+G.EKA+'={'+keyA.join(',')+'}',
     'local '+G.EKB+'={'+keyB.join(',')+'}',
     'local '+G.ES+'={'+encStrs.join(',')+'}',
