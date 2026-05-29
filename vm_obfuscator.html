@@ -515,7 +515,7 @@ function genOpcodeMap(){
     return a;
   }
   const DEAD_COUNT=20;
-  const ALIAS_PER_KIND=2; // polymorphic: each NK kind gets 2 extra alias opcodes
+  const ALIAS_PER_KIND=5; // polymorphic: each NK kind gets 5 extra alias opcodes
   const poolSize=nodeKinds.length*(1+ALIAS_PER_KIND)+opKinds.length+DEAD_COUNT+40;
   const pool=shuffled(poolSize);
   // Shuffle nodeKinds before assignment — breaks positional analysis of obfuscator source
@@ -701,12 +701,38 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
       nkdecEntries.push('['+(v^AOXR)+']='+canonical);
     }
   }
-  // Advanced opaque predicates — always-false math conditions for dead branches
+  // Advanced opaque predicates — multiple templates for always-false / always-true conditions
   function genOpaqueAlwaysFalse(){
-    const N=Math.floor(Math.random()*0xEEEE)+0x1111;
-    const V=N&0xFF;
-    const badV=(V+1)&0xFF;
-    return 'bit32.band('+N+',255)=='+badV;
+    const templates=[
+      // bit32.band(N,255) == badV — band extracts low byte, badV is always wrong
+      function(){ const N=Math.floor(Math.random()*0xEEEE)+0x1111; return 'bit32.band('+N+',255)=='+((N&0xFF)+1&0xFF); },
+      // n*n % 4 == 3 — squares mod 4 are always 0 or 1, never 3
+      function(){ const N=Math.floor(Math.random()*9998)+2; return '('+N+'*'+N+')%4==3'; },
+      // (n*n+n) % 2 == 1 — n(n+1) is always even, so mod 2 is always 0
+      function(){ const N=Math.floor(Math.random()*9998)+2; return '('+N+'*'+N+'+'+N+')%2==1'; },
+      // n % 1 ~= 0 — any integer mod 1 is always 0
+      function(){ const N=Math.floor(Math.random()*9998)+2; return N+'%1~=0'; },
+      // bit32.bor(n,n) ~= n — OR of n with itself is always n
+      function(){ const N=Math.floor(Math.random()*0xFFFF)+1; return 'bit32.bor('+N+','+N+')~='+N; },
+      // (n+1)*(n+1) < n*n — always false for positive n
+      function(){ const N=Math.floor(Math.random()*9998)+2; return (N+1)+'*'+(N+1)+'<'+N+'*'+N; },
+    ];
+    return templates[Math.floor(Math.random()*templates.length)]();
+  }
+  function genOpaqueAlwaysTrue(){
+    const templates=[
+      // bit32.band(n,n) == n — AND of n with itself is always n
+      function(){ const N=Math.floor(Math.random()*0xFFFF)+1; return 'bit32.band('+N+','+N+')=='+N; },
+      // n*n % 4 ~= 3 — squares mod 4 never equal 3, so ~= is always true
+      function(){ const N=Math.floor(Math.random()*9998)+2; return '('+N+'*'+N+')%4~=3'; },
+      // n % 1 == 0 — any integer mod 1 is always 0
+      function(){ const N=Math.floor(Math.random()*9998)+2; return N+'%1==0'; },
+      // (n*n+n) % 2 == 0 — n(n+1) is always even
+      function(){ const N=Math.floor(Math.random()*9998)+2; return '('+N+'*'+N+'+'+N+')%2==0'; },
+      // bit32.bor(n,0) == n — OR with 0 is identity
+      function(){ const N=Math.floor(Math.random()*0xFFFF)+1; return 'bit32.bor('+N+',0)=='+N; },
+    ];
+    return templates[Math.floor(Math.random()*templates.length)]();
   }
   let _deadIdx=0;
   function deadExprBranch(){ const d=DEAD[_deadIdx++%DEAD.length]; return '  elseif '+G.nk+'=='+d+' and '+genOpaqueAlwaysFalse()+' then local _='+G.nk; }
@@ -773,6 +799,16 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     'local '+G.NKDEC+'={'+nkdecEntries.join(',')+'}',
   ];
 
+  // Wrap handler body in always-true predicate: function(params) if <true> then <body> else <dead> end end
+  function wrapExprTrue(code){
+    const i=code.indexOf(')'); // end of function params
+    return code.slice(0,i+1)+' if '+genOpaqueAlwaysTrue()+' then'+code.slice(i+1,code.length-4)+' else return nil end end';
+  }
+  function wrapBlockTrue(code){
+    const i=code.indexOf(')'); // end of function params
+    return code.slice(0,i+1)+' if '+genOpaqueAlwaysTrue()+' then'+code.slice(i+1,code.length-4)+' else return nil,nil,'+G.si+'+1 end end';
+  }
+
   const innerLines = [
 ...setupLines,
 'local '+G.CF0+','+G.CF1+','+G.CF2+','+G.CF3+','+G.CF4+'=0,1,2,3,4',
@@ -824,18 +860,18 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 ' return '+G.v+' end'});
   handlers.push({key:NK['name'], code:
 'function('+G.n+','+G.env+') return '+G.getVar+'('+G.env+','+G.n+'[2]) end'});
-  handlers.push({key:NK['field'], code:
+  handlers.push({key:NK['field'], code:wrapExprTrue(
 'function('+G.n+','+G.env+')'+
 ' local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
 ' if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end'+
-' return '+G.obj+'['+G.n+'[3]] end'});
-  handlers.push({key:NK['index'], code:
+' return '+G.obj+'['+G.n+'[3]] end')});
+  handlers.push({key:NK['index'], code:wrapExprTrue(
 'function('+G.n+','+G.env+')'+
 ' local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
 ' if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end'+
 ' local '+G.idx+'='+G.evalExpr+'('+G.n+'[3],'+G.env+')'+
-' return '+G.obj+'['+G.idx+'] end'});
-  handlers.push({key:NK['tbl'], code:
+' return '+G.obj+'['+G.idx+'] end')});
+  handlers.push({key:NK['tbl'], code:wrapExprTrue(
 'function('+G.n+','+G.env+')'+
 ' local '+G.r+'={} local '+G.ai+'=1'+
 ' for _,'+G.fldNode+' in ipairs('+G.n+'[2]) do'+
@@ -851,7 +887,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '   else '+G.r+'['+G.ai+']='+G.v+' '+G.ai+'='+G.ai+'+1 end'+
 '  end'+
 ' end'+
-' return '+G.r+' end'});
+' return '+G.r+' end')});
   handlers.push({key:NK['func'], code:
 'function('+G.n+','+G.env+')'+
 ' local '+G.params+','+G.isVA+','+G.body+'='+G.n+'[2],'+G.n+'[3],'+G.n+'[4]'+
@@ -871,7 +907,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  end'+
 ' end'+
 ' end'});
-  handlers.push({key:NK['call'], code:
+  handlers.push({key:NK['call'], code:wrapExprTrue(
 'function('+G.n+','+G.env+')'+
 ' local '+G.fn+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
 ' local '+G.as+'={} local _nc=0'+
@@ -890,8 +926,8 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end'+
 '  return '+G.mt+
 ' end'+
-' return '+G.rv+'[2] end'});
-  handlers.push({key:NK['callm'], code:
+' return '+G.rv+'[2] end')});
+  handlers.push({key:NK['callm'], code:wrapExprTrue(
 'function('+G.n+','+G.env+')'+
 ' local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
 ' if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end'+
@@ -912,8 +948,8 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end'+
 '  return '+G.mt+
 ' end'+
-' return '+G.rv+'[2] end'});
-  handlers.push({key:NK['binop'], code:
+' return '+G.rv+'[2] end')});
+  handlers.push({key:NK['binop'], code:wrapExprTrue(
 'function('+G.n+','+G.env+')'+
 ' local _bop='+G.n+'[2]'+
 ' if _bop=='+OK['and']+' then'+
@@ -950,8 +986,8 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 ' elseif _bop=='+OK['~']+' then return bit32.bxor(_l,_r)'+
 ' elseif _bop=='+OK['>>']+' then return bit32.rshift(_l,_r)'+
 ' elseif _bop=='+OK['<<']+' then return bit32.lshift(_l,_r)'+
-' end end'});
-  handlers.push({key:NK['unop'], code:
+' end end')});
+  handlers.push({key:NK['unop'], code:wrapExprTrue(
 'function('+G.n+','+G.env+')'+
 ' local _uop='+G.n+'[2]'+
 ' local _v='+G.evalExpr+'('+G.n+'[3],'+G.env+')'+
@@ -960,13 +996,18 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 ' elseif _uop=='+OK['-u']+' then return -_v'+
 ' elseif _uop=='+OK['#']+' then return #_v'+
 ' elseif _uop=='+OK['~u']+' then return bit32.bnot(_v)'+
-' end end'});
+' end end')});
   handlers.push({key:NK['dead'], code:
 'function() return nil end'});
-  // Add dead opcode entries with opaque predicates
-  for(let di=0;di<DEAD.length && di<4;di++){
-    handlers.push({key:DEAD[di], code:
-'function() if '+genOpaqueAlwaysFalse()+' then return 1 end return nil end'});
+  // Add dead opcode entries — mix of always-false and always-true predicates
+  for(let di=0;di<DEAD.length && di<8;di++){
+    if(di%2===0){
+      handlers.push({key:DEAD[di], code:
+'function('+G.n+','+G.env+') if '+genOpaqueAlwaysFalse()+' then return '+G.evalExpr+'('+G.n+','+G.env+') end return nil end'});
+    } else {
+      handlers.push({key:DEAD[di], code:
+'function('+G.n+','+G.env+') if '+genOpaqueAlwaysTrue()+' then return nil else return '+G.n+'[2] end end'});
+    }
   }
   // Shuffle handler registration order
   for(let i=handlers.length-1;i>0;i--){
@@ -995,7 +1036,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' '+G.evalExpr+'('+G.s+'[2],'+G.env+')'+
 ' return nil,nil,'+G.si+'+1 end'});
-  handlers.push({key:NK['local'], code:
+  handlers.push({key:NK['local'], code:wrapBlockTrue(
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.ev+'={} local _ec=0'+
 ' for '+G.j+',_vn in ipairs('+G.s+'[3]) do'+
@@ -1007,8 +1048,8 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  else _ec=_ec+1 '+G.ev+'[_ec]='+G.evalExpr+'(_vn,'+G.env+') end'+
 ' end'+
 ' for '+G.j+','+G.nm+' in ipairs('+G.s+'[2]) do '+G.env+'._v['+G.nm+']='+G.ev+'['+G.j+'] '+G.env+'._d['+G.nm+']=true end'+
-' return nil,nil,'+G.si+'+1 end'});
-  handlers.push({key:NK['assign'], code:
+' return nil,nil,'+G.si+'+1 end')});
+  handlers.push({key:NK['assign'], code:wrapBlockTrue(
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.ev+'={} local _ec=0'+
 ' for '+G.j+',_vn in ipairs('+G.s+'[3]) do'+
@@ -1031,14 +1072,14 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '   '+G.to+'['+G.tk2+']='+G.ev+'['+G.j+']'+
 '  end'+
 ' end'+
-' return nil,nil,'+G.si+'+1 end'});
+' return nil,nil,'+G.si+'+1 end')});
   handlers.push({key:NK['do'], code:
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.de+'='+G.makeEnv+'('+G.env+',nil)'+
 ' local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[2],'+G.de+')'+
 ' if '+G._sig+'~='+G.CF0+' then return '+G._sig+','+G._vals+','+G.si+' end'+
 ' return nil,nil,'+G.si+'+1 end'});
-  handlers.push({key:NK['while'], code:
+  handlers.push({key:NK['while'], code:wrapBlockTrue(
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local _gsi=false'+
 ' while true do'+
@@ -1055,7 +1096,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  end'+
 ' end'+
 ' if _gsi then return nil,nil,_gsi end'+
-' return nil,nil,'+G.si+'+1 end'});
+' return nil,nil,'+G.si+'+1 end')});
   handlers.push({key:NK['repeat'], code:
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' repeat'+
@@ -1068,7 +1109,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  if _crp then break end'+
 ' until false'+
 ' return nil,nil,'+G.si+'+1 end'});
-  handlers.push({key:NK['if'], code:
+  handlers.push({key:NK['if'], code:wrapBlockTrue(
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.taken+'=false'+
 ' local _cif='+G.evalExpr+'('+G.s+'[2],'+G.env+')'+
@@ -1096,8 +1137,8 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[5],'+G.ie+')'+
 '  if '+G._sig+'~='+G.CF0+' then return '+G._sig+','+G._vals+','+G.si+' end'+
 ' end'+
-' return nil,nil,'+G.si+'+1 end'});
-  handlers.push({key:NK['numfor'], code:
+' return nil,nil,'+G.si+'+1 end')});
+  handlers.push({key:NK['numfor'], code:wrapBlockTrue(
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.nm+'='+G.s+'[2]'+
 ' local '+G.fi+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')'+
@@ -1111,8 +1152,8 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  if '+G._sig+'=='+G.CF2+' then return '+G._sig+','+G._vals+','+G.si+' end'+
 '  '+G.fi+'='+G.fi+'+'+G.sp+
 ' end'+
-' return nil,nil,'+G.si+'+1 end'});
-  handlers.push({key:NK['genfor'], code:
+' return nil,nil,'+G.si+'+1 end')});
+  handlers.push({key:NK['genfor'], code:wrapBlockTrue(
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.ev+'={}'+
 ' for '+G.j+',_it in ipairs('+G.s+'[3]) do'+
@@ -1134,7 +1175,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  if '+G._sig+'=='+G.CF1+' then break end'+
 '  if '+G._sig+'=='+G.CF2+' then return '+G._sig+','+G._vals+','+G.si+' end'+
 ' end'+
-' return nil,nil,'+G.si+'+1 end'});
+' return nil,nil,'+G.si+'+1 end')});
   handlers.push({key:NK['return'], code:
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.ev+'={}'+
@@ -1151,7 +1192,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 'function('+G.s+','+G.env+','+G.si+') return '+G.CF1+',nil,'+G.si+' end'});
   handlers.push({key:NK['continue'], code:
 'function('+G.s+','+G.env+','+G.si+') return '+G.CF4+',nil,'+G.si+' end'});
-  handlers.push({key:NK['funcdef'], code:
+  handlers.push({key:NK['funcdef'], code:wrapBlockTrue(
 'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
 ' local '+G.fn+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')'+
 ' local '+G.tg+'='+G.s+'[2]'+
@@ -1161,7 +1202,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')'+
 '  '+G.to+'['+G.tg+'[3]]='+G.fn+
 ' end'+
-' return nil,nil,'+G.si+'+1 end'});
+' return nil,nil,'+G.si+'+1 end')});
   handlers.push({key:NK['localfunc'], code:
 'function('+G.s+','+G.env+','+G.si+')'+
 ' '+G.env+'._d['+G.s+'[2]]=true '+G.env+'._v['+G.s+'[2]]=nil'+
@@ -1175,10 +1216,15 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 ' return '+G.CF3+','+G.s+'[2],'+G.si+' end'});
   handlers.push({key:NK['dead'], code:
 'function('+G.s+','+G.env+','+G.si+') return nil,nil,'+G.si+'+1 end'});
-  // Add dead opcode entries
-  for(let di=0;di<DEAD.length && di<4;di++){
-    handlers.push({key:DEAD[di], code:
-'function('+G.s+','+G.env+','+G.si+') if '+genOpaqueAlwaysFalse()+' then return '+G.CF1+',nil,'+G.si+' end return nil,nil,'+G.si+'+1 end'});
+  // Add dead opcode entries — mix of always-false and always-true predicates
+  for(let di=0;di<DEAD.length && di<8;di++){
+    if(di%2===0){
+      handlers.push({key:DEAD[di], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+') if '+genOpaqueAlwaysFalse()+' then '+G.evalExpr+'('+G.s+','+G.env+') return '+G.CF1+',nil,'+G.si+' end return nil,nil,'+G.si+'+1 end'});
+    } else {
+      handlers.push({key:DEAD[di], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+') if '+genOpaqueAlwaysTrue()+' then return nil,nil,'+G.si+'+1 else return '+G.CF2+',{'+G.s+'[2]},'+G.si+' end end'});
+    }
   }
   // Shuffle handler registration order
   for(let i=handlers.length-1;i>0;i--){
