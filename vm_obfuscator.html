@@ -673,7 +673,8 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     'S','ES','EKA','EKB','dI','dJ','dR','ki',
     'NKDEC','accLen',
     'ED','BD','_sig','_vals','_nsi',
-    'EAST','dkAST','dpAST'
+    'EAST','dkAST','dpAST',
+    'nextSI'
   ].forEach(function(name){ R[name]=rn(); });
 
   const G=R; // alias
@@ -750,20 +751,24 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     'local '+G.EKA+'={'+keyA.join(',')+'}',
     'local '+G.EKB+'={'+keyB.join(',')+'}',
     'local '+G.ES+'={'+encStrs.join(',')+'}',
-    'local '+G.S+'={}',
     'local '+G.accLen+'=0',
-    'for '+G.dI+'=1,#'+G.ES+' do',
-    '  local '+G.dR+'={}',
-    '  for '+G.dJ+'=1,#'+G.ES+'['+G.dI+'] do',
-    '    local '+G.ki+'=('+G.dI+'+'+G.dJ+'-1+'+G.accLen+')%'+KEY_LEN+'+1',
-    '    local _inc=(('+G.ki+'-1)*'+SMUL+'+'+SADD+')%256',
-    '    local _sa=('+G.EKB+'['+G.ki+']-_inc+256)%256',
-    '    '+G.dR+'['+G.dJ+']=string.char(bit32.bxor(string.byte('+G.ES+'['+G.dI+'],'+G.dJ+'),bit32.bxor('+G.EKA+'['+G.ki+'],_sa)))',
+    'local '+G.nextSI+'=1',
+    'local '+G.S+'=setmetatable({},{__index=function('+G.t+','+G.k+')',
+    '  while '+G.nextSI+'<='+G.k+' do',
+    '    local '+G.dR+'={}',
+    '    for '+G.dJ+'=1,#'+G.ES+'['+G.nextSI+'] do',
+    '      local '+G.ki+'=('+G.nextSI+'+'+G.dJ+'-1+'+G.accLen+')%'+KEY_LEN+'+1',
+    '      local _inc=(('+G.ki+'-1)*'+SMUL+'+'+SADD+')%256',
+    '      local _sa=('+G.EKB+'['+G.ki+']-_inc+256)%256',
+    '      '+G.dR+'['+G.dJ+']=string.char(bit32.bxor(string.byte('+G.ES+'['+G.nextSI+'],'+G.dJ+'),bit32.bxor('+G.EKA+'['+G.ki+'],_sa)))',
+    '    end',
+    '    '+G.accLen+'=('+G.accLen+'+#'+G.dR+')%'+KEY_LEN,
+    '    rawset('+G.t+','+G.nextSI+',table.concat('+G.dR+'))',
+    '    '+G.nextSI+'='+G.nextSI+'+1',
     '  end',
-    '  '+G.accLen+'=('+G.accLen+'+#'+G.dR+')%'+KEY_LEN,
-    '  '+G.S+'['+G.dI+']=table.concat('+G.dR+')',
-    'end',
-    G.EKA+'=nil '+G.EKB+'=nil '+G.ES+'=nil '+G.accLen+'=nil',
+    '  if '+G.nextSI+'>#'+G.ES+' then '+G.EKA+'=nil '+G.EKB+'=nil '+G.ES+'=nil '+G.accLen+'=nil end',
+    '  return rawget('+G.t+','+G.k+')',
+    'end})',
     // NKDEC dispatch table: maps XOR'd(polyopcode) → canonical NK value
     'local '+G.NKDEC+'={'+nkdecEntries.join(',')+'}',
   ];
