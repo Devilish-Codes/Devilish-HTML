@@ -674,15 +674,16 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     'NKDEC','accLen',
     'ED','BD','_sig','_vals','_nsi',
     'EAST','dkAST','dpAST',
-    'nextSI'
+    'nextSI','sHash'
   ].forEach(function(name){ R[name]=rn(); });
 
   const G=R; // alias
 
-  // String encryption: position-dependent 2-array key + stateful length accumulator
+  // String encryption: position-dependent 2-array key + stateful rolling hash
   // EKA[i] = masterKey[i] ^ saltA[i]
   // EKB[i] = (saltA[i] + (i-1)*SMUL + SADD) % 256
-  // Stateful: ki offset shifts by cumulative decoded string lengths (breaks static decryption)
+  // Stateful: accLen shifts ki index; rolling hash (sHash) XOR'd into per-byte key
+  // sHash depends on actual plaintext content of all previously decrypted strings
   const KEY_LEN=16;
   const masterKey=Array.from({length:KEY_LEN},function(){ return Math.floor(Math.random()*254)+1; });
   const saltA=Array.from({length:KEY_LEN},function(){ return Math.floor(Math.random()*254)+1; });
@@ -690,6 +691,11 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
   const SADD=Math.floor(Math.random()*60)+20;
   const keyA=masterKey.map(function(b,i){ return b^saltA[i]; });
   const keyB=saltA.map(function(s,i){ return (s+(i*SMUL+SADD))%256; });
+  // Rolling hash constants — key for string N depends on content of strings 1..N-1
+  const HMOD=16777216; // 2^24
+  const HSEED=Math.floor(Math.random()*(HMOD-1))+1;
+  const HMUL=(Math.floor(Math.random()*126)+1)*2+1; // odd 3..253
+  const HADD=Math.floor(Math.random()*254)+1;
   // AST opcode XOR mask — every opcode stored in AST is XOR'd with AOXR;
   // VM decodes with bit32.bxor(s[1], AOXR) before dispatch table lookup
   const AOXR=Math.floor(Math.random()*253)+1;
@@ -741,14 +747,22 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     if(bytes.length===0) return '""';
     return '"'+bytes.map(function(b){ return '\\'+b; }).join('')+'"';
   }
-  // Stateful string encryption: running accLen shifts ki index each string
+  // Stateful string encryption: rolling hash + accLen shift
+  // Each byte encrypted with: plainByte XOR masterKey[ki] XOR (sHash % 256)
+  // After each string, sHash updated with all its plaintext bytes
   let _sAccLen=0;
+  let _sHash=HSEED;
   const encStrs=strArr.map(function(s,i){
     const bytes=[];
     const idx=i+1;
     for(let j=0;j<s.length;j++){
       const ki=(idx+j+_sAccLen)%KEY_LEN;
-      bytes.push((s.charCodeAt(j)&0xFF)^masterKey[ki]);
+      const plainByte=s.charCodeAt(j)&0xFF;
+      bytes.push(plainByte^masterKey[ki]^(_sHash&0xFF));
+    }
+    // Update rolling hash with plaintext content
+    for(let j=0;j<s.length;j++){
+      _sHash=(_sHash*HMUL+(s.charCodeAt(j)&0xFF)+HADD)%HMOD;
     }
     _sAccLen=(_sAccLen+s.length)%KEY_LEN;
     return luaByteLiteral(bytes);
@@ -778,6 +792,7 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     'local '+G.EKB+'={'+keyB.join(',')+'}',
     'local '+G.ES+'={'+encStrs.join(',')+'}',
     'local '+G.accLen+'=0',
+    'local '+G.sHash+'='+HSEED,
     'local '+G.nextSI+'=1',
     'local '+G.S+'=setmetatable({},{__index=function('+G.t+','+G.k+')',
     '  while '+G.nextSI+'<='+G.k+' do',
@@ -786,13 +801,18 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     '      local '+G.ki+'=('+G.nextSI+'+'+G.dJ+'-1+'+G.accLen+')%'+KEY_LEN+'+1',
     '      local _inc=(('+G.ki+'-1)*'+SMUL+'+'+SADD+')%256',
     '      local _sa=('+G.EKB+'['+G.ki+']-_inc+256)%256',
-    '      '+G.dR+'['+G.dJ+']=string.char(bit32.bxor(string.byte('+G.ES+'['+G.nextSI+'],'+G.dJ+'),bit32.bxor('+G.EKA+'['+G.ki+'],_sa)))',
+    '      local _pb=bit32.bxor(string.byte('+G.ES+'['+G.nextSI+'],'+G.dJ+'),bit32.bxor('+G.EKA+'['+G.ki+'],_sa),'+G.sHash+'%256)',
+    '      '+G.dR+'['+G.dJ+']=string.char(_pb)',
+    '    end',
+    // Update rolling hash with decrypted plaintext bytes
+    '    for '+G.dJ+'=1,#'+G.dR+' do',
+    '      '+G.sHash+'=('+G.sHash+'*'+HMUL+'+string.byte('+G.dR+'['+G.dJ+'],1)+'+HADD+')%'+HMOD,
     '    end',
     '    '+G.accLen+'=('+G.accLen+'+#'+G.dR+')%'+KEY_LEN,
     '    rawset('+G.t+','+G.nextSI+',table.concat('+G.dR+'))',
     '    '+G.nextSI+'='+G.nextSI+'+1',
     '  end',
-    '  if '+G.nextSI+'>#'+G.ES+' then '+G.EKA+'=nil '+G.EKB+'=nil '+G.ES+'=nil '+G.accLen+'=nil end',
+    '  if '+G.nextSI+'>#'+G.ES+' then '+G.EKA+'=nil '+G.EKB+'=nil '+G.ES+'=nil '+G.accLen+'=nil '+G.sHash+'=nil end',
     '  return rawget('+G.t+','+G.k+')',
     'end})',
     // NKDEC dispatch table: maps XOR'd(polyopcode) → canonical NK value
