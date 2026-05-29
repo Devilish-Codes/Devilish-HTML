@@ -672,7 +672,8 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     'lbl',
     'S','ES','EKA','EKB','dI','dJ','dR','ki',
     'NKDEC','accLen',
-    'ED','BD','_sig','_vals','_nsi'
+    'ED','BD','_sig','_vals','_nsi',
+    'EAST','dkAST','dpAST'
   ].forEach(function(name){ R[name]=rn(); });
 
   const G=R; // alias
@@ -726,6 +727,24 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     return luaByteLiteral(bytes);
   });
   const safeAstStr=astStr.replace(/_S\[/g,G.S+'[');
+
+  // ── Sequential AST Encryption ──────────────────────────────────────────────
+  // Factory function pattern: wrap AST so string table is passed as parameter
+  const factoryAstStr=safeAstStr.replace(new RegExp(G.S.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\[','g'),'_SS[');
+  const factoryStr='return function(_SS) return '+factoryAstStr+' end';
+  // Rolling XOR encryption with sequential byte dependency
+  const AST_MOD=16777216; // 2^24
+  const AST_SEED=Math.floor(Math.random()*(AST_MOD-1))+1;
+  const AST_MULT=(Math.floor(Math.random()*126)+1)*2+1; // odd 3..253
+  const AST_ADD=Math.floor(Math.random()*254)+1;
+  let astDk=AST_SEED;
+  const encAstBytes=[];
+  for(let i=0;i<factoryStr.length;i++){
+    const b=factoryStr.charCodeAt(i)&0xFF;
+    encAstBytes.push(b^(astDk&0xFF));
+    astDk=(astDk*AST_MULT+b+AST_ADD)%AST_MOD;
+  }
+  const encAstLiteral=luaByteLiteral(encAstBytes);
   const setupLines=[
     'local _GENV=getgenv and getgenv() or _G',
     'local '+G.EKA+'={'+keyA.join(',')+'}',
@@ -1188,7 +1207,17 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
   return lines;
 })(),
 '',
-'local '+G.AST+'='+safeAstStr,
+// ── AST decryption + factory load ──
+'local '+G.EAST+'='+encAstLiteral,
+'local '+G.dkAST+'='+AST_SEED,
+'local '+G.dpAST+'={}',
+'for _i=1,#'+G.EAST+' do',
+'  local _b=bit32.bxor(string.byte('+G.EAST+',_i),'+G.dkAST+'%256)',
+'  '+G.dpAST+'[_i]=string.char(_b)',
+'  '+G.dkAST+'=('+G.dkAST+'*'+AST_MULT+'+_b+'+AST_ADD+')%'+AST_MOD,
+'end',
+'local '+G.AST+'=(load or loadstring)(table.concat('+G.dpAST+'))()('+G.S+')',
+G.EAST+'=nil '+G.dpAST+'=nil '+G.dkAST+'=nil',
 'local '+G.genv+'={_p=nil,_up=nil,_v={},_d={}}',
 G.evalBlock+'('+G.AST+','+G.genv+')',
   ].join('\n');
