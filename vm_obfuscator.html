@@ -674,7 +674,7 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     'NKDEC','accLen',
     'ED','BD','_sig','_vals','_nsi',
     'EAST','dkAST','dpAST',
-    'nextSI','sHash'
+    'nextSI','sHash','tCk','tI','tJ'
   ].forEach(function(name){ R[name]=rn(); });
 
   const G=R; // alias
@@ -750,15 +750,22 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
   // Stateful string encryption: rolling hash + accLen shift
   // Each byte encrypted with: plainByte XOR masterKey[ki] XOR (sHash % 256)
   // After each string, sHash updated with all its plaintext bytes
+  // Anti-tamper: accumulate checksum over all encrypted bytes
+  const TMOD=16777216; // 2^24
+  const TSEED=Math.floor(Math.random()*(TMOD-1))+1;
+  const TMUL=(Math.floor(Math.random()*126)+1)*2+1; // odd 3..253
   let _sAccLen=0;
   let _sHash=HSEED;
+  let _tChk=TSEED; // tamper checksum accumulator
   const encStrs=strArr.map(function(s,i){
     const bytes=[];
     const idx=i+1;
     for(let j=0;j<s.length;j++){
       const ki=(idx+j+_sAccLen)%KEY_LEN;
       const plainByte=s.charCodeAt(j)&0xFF;
-      bytes.push(plainByte^masterKey[ki]^(_sHash&0xFF));
+      const enc=plainByte^masterKey[ki]^(_sHash&0xFF);
+      bytes.push(enc);
+      _tChk=(_tChk*TMUL+enc+1)%TMOD; // feed encrypted byte into checksum
     }
     // Update rolling hash with plaintext content
     for(let j=0;j<s.length;j++){
@@ -782,7 +789,9 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
   const encAstBytes=[];
   for(let i=0;i<factoryStr.length;i++){
     const b=factoryStr.charCodeAt(i)&0xFF;
-    encAstBytes.push(b^(astDk&0xFF));
+    const enc=b^(astDk&0xFF);
+    encAstBytes.push(enc);
+    _tChk=(_tChk*TMUL+enc+1)%TMOD; // feed AST encrypted byte into checksum
     astDk=(astDk*AST_MULT+b+AST_ADD)%AST_MOD;
   }
   const encAstLiteral=luaByteLiteral(encAstBytes);
@@ -1280,6 +1289,18 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '',
 // ── AST decryption + factory load ──
 'local '+G.EAST+'='+encAstLiteral,
+// ── Anti-tamper: verify integrity of encrypted string table + AST blob ──
+// Recompute checksum over all encrypted bytes; if tampered, corrupt EKA silently
+'do local '+G.tCk+'='+TSEED,
+'for '+G.tI+'=1,#'+G.ES+' do for '+G.tJ+'=1,#'+G.ES+'['+G.tI+'] do',
+'  '+G.tCk+'=('+G.tCk+'*'+TMUL+'+string.byte('+G.ES+'['+G.tI+'],'+G.tJ+')+1)%'+TMOD,
+'end end',
+'for '+G.tI+'=1,#'+G.EAST+' do',
+'  '+G.tCk+'=('+G.tCk+'*'+TMUL+'+string.byte('+G.EAST+','+G.tI+')+1)%'+TMOD,
+'end',
+'if '+G.tCk+'~='+_tChk+' then',
+'  for '+G.tI+'=1,#'+G.EKA+' do '+G.EKA+'['+G.tI+']=bit32.bxor('+G.EKA+'['+G.tI+'],171) end',
+'end end',
 'local '+G.dkAST+'='+AST_SEED,
 'local '+G.dpAST+'={}',
 'for _i=1,#'+G.EAST+' do',
