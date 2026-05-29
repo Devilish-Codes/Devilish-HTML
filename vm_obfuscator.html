@@ -515,21 +515,28 @@ function genOpcodeMap(){
     return a;
   }
   const DEAD_COUNT=20;
-  const pool=shuffled(nodeKinds.length+opKinds.length+DEAD_COUNT+30);
+  const ALIAS_PER_KIND=2; // polymorphic: each NK kind gets 2 extra alias opcodes
+  const poolSize=nodeKinds.length*(1+ALIAS_PER_KIND)+opKinds.length+DEAD_COUNT+40;
+  const pool=shuffled(poolSize);
   // Shuffle nodeKinds before assignment — breaks positional analysis of obfuscator source
   const nkShuf=[...nodeKinds];
   for(let i=nkShuf.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[nkShuf[i],nkShuf[j]]=[nkShuf[j],nkShuf[i]];}
-  const NK={}, OK={};
-  nkShuf.forEach((k,i)=>NK[k]=pool[i]);
-  opKinds.forEach((k,i)=>OK[k]=pool[nkShuf.length+i]);
-  // Dead opcodes: valid integers not assigned to any real node kind
+  let pi=0;
+  const NK={}, NK_ALIASES={}, OK={};
+  nkShuf.forEach(function(k){
+    NK[k]=pool[pi++];
+    NK_ALIASES[k]=[];
+    for(let a=0;a<ALIAS_PER_KIND;a++) NK_ALIASES[k].push(pool[pi++]);
+  });
+  opKinds.forEach(function(k){ OK[k]=pool[pi++]; });
+  // Dead opcodes: valid integers not assigned to any real node kind or aliases
   const DEAD=[];
-  for(let i=0;i<DEAD_COUNT;i++) DEAD.push(pool[nkShuf.length+opKinds.length+i]);
-  return {NK,OK,DEAD};
+  for(let i=0;i<DEAD_COUNT;i++) DEAD.push(pool[pi++]);
+  return {NK,NK_ALIASES,OK,DEAD};
 }
 
 // ─── AST SERIALIZER ───────────────────────────────────────────────────────────
-function serializeAST(ast, NK, OK){
+function serializeAST(ast, NK, NK_ALIASES, OK){
   // string deduplication table
   const _strMap=new Map(), _strArr=[];
   function encStr(s){
@@ -542,85 +549,90 @@ function serializeAST(ast, NK, OK){
     const k=Math.floor(Math.random()*200)+50;
     return '('+(n+k)+'-'+k+')';
   }
+  // Polymorphic opcodes: randomly pick canonical or any alias value per node
+  function polyNK(k){
+    const all=[NK[k],...NK_ALIASES[k]];
+    return all[Math.floor(Math.random()*all.length)];
+  }
 
   function sExpr(e){
-    if(!e) return '{'+NK.nil+'}';
+    if(!e) return '{'+polyNK('nil')+'}';
     switch(e.k){
-      case 'nil':    return '{'+NK.nil+'}';
-      case 'true':   return '{'+NK.true+'}';
-      case 'false':  return '{'+NK.false+'}';
-      case 'num':    return '{'+NK.num+','+encNum(e.v)+'}';
-      case 'str':    return '{'+NK.str+','+encStr(e.v)+'}';
-      case 'vararg': return '{'+NK.vararg+'}';
-      case 'paren':  return '{'+NK.paren+','+sExpr(e.e)+'}';
-      case 'name':   return '{'+NK.name+','+encStr(e.n)+'}';
-      case 'field':  return '{'+NK.field+','+sExpr(e.obj)+','+encStr(e.f)+'}';
-      case 'index':  return '{'+NK.index+','+sExpr(e.obj)+','+sExpr(e.idx)+'}';
-      case 'binop':  return '{'+NK.binop+','+(OK[e.op]||0)+','+sExpr(e.l)+','+sExpr(e.r)+'}';
+      case 'nil':    return '{'+polyNK('nil')+'}';
+      case 'true':   return '{'+polyNK('true')+'}';
+      case 'false':  return '{'+polyNK('false')+'}';
+      case 'num':    return '{'+polyNK('num')+','+encNum(e.v)+'}';
+      case 'str':    return '{'+polyNK('str')+','+encStr(e.v)+'}';
+      case 'vararg': return '{'+polyNK('vararg')+'}';
+      case 'paren':  return '{'+polyNK('paren')+','+sExpr(e.e)+'}';
+      case 'name':   return '{'+polyNK('name')+','+encStr(e.n)+'}';
+      case 'field':  return '{'+polyNK('field')+','+sExpr(e.obj)+','+encStr(e.f)+'}';
+      case 'index':  return '{'+polyNK('index')+','+sExpr(e.obj)+','+sExpr(e.idx)+'}';
+      case 'binop':  return '{'+polyNK('binop')+','+(OK[e.op]||0)+','+sExpr(e.l)+','+sExpr(e.r)+'}';
       case 'unop': {
         const uop = e.op==='-' ? '-u' : e.op==='~' ? '~u' : e.op;
-        return '{'+NK.unop+','+(OK[uop]||0)+','+sExpr(e.e)+'}';
+        return '{'+polyNK('unop')+','+(OK[uop]||0)+','+sExpr(e.e)+'}';
       }
-      case 'call':   return '{'+NK.call+','+sExpr(e.f)+',{'+e.args.map(sExpr).join(',')+'}}';
-      case 'callm':  return '{'+NK.callm+','+sExpr(e.obj)+','+encStr(e.m)+',{'+e.args.map(sExpr).join(',')+'}}';;
+      case 'call':   return '{'+polyNK('call')+','+sExpr(e.f)+',{'+e.args.map(sExpr).join(',')+'}}';
+      case 'callm':  return '{'+polyNK('callm')+','+sExpr(e.obj)+','+encStr(e.m)+',{'+e.args.map(sExpr).join(',')+'}}';;
       case 'func':   return sFunc(e);
-      case 'tbl':    return '{'+NK.tbl+',{'+e.fields.map(sField).join(',')+'}}';
-      default: return '{'+NK.nil+'}';
+      case 'tbl':    return '{'+polyNK('tbl')+',{'+e.fields.map(sField).join(',')+'}}';
+      default: return '{'+polyNK('nil')+'}';
     }
   }
   function sField(f){
-    if(f.k==='kv') return '{'+NK.kv+','+sExpr(f.key)+','+sExpr(f.val)+'}';
-    if(f.k==='nv') return '{'+NK.nv+','+encStr(f.key)+','+sExpr(f.val)+'}';
-    return '{'+NK.v+','+sExpr(f.val)+'}';
+    if(f.k==='kv') return '{'+polyNK('kv')+','+sExpr(f.key)+','+sExpr(f.val)+'}';
+    if(f.k==='nv') return '{'+polyNK('nv')+','+encStr(f.key)+','+sExpr(f.val)+'}';
+    return '{'+polyNK('v')+','+sExpr(f.val)+'}';
   }
   function sFunc(fn){
-    return '{'+NK.func+',{'+fn.params.map(encStr).join(',')+'}'
+    return '{'+polyNK('func')+',{'+fn.params.map(encStr).join(',')+'}'
       +','+( fn.vararg?'true':'false')+','+sBlock(fn.body)+'}';
   }
   function sBlock(b){
     const parts=[];
     for(const st of b.body){
-      if(Math.random()<0.18) parts.push('{'+NK.dead+'}');
+      if(Math.random()<0.18) parts.push('{'+polyNK('dead')+'}');
       parts.push(sStmt(st));
     }
-    if(parts.length>0 && Math.random()<0.12) parts.push('{'+NK.dead+'}');
-    return '{'+NK.block+',{'+parts.join(',')+'}}';
+    if(parts.length>0 && Math.random()<0.12) parts.push('{'+polyNK('dead')+'}');
+    return '{'+polyNK('block')+',{'+parts.join(',')+'}}';
   }
   function sStmt(s){
-    if(!s) return '{'+NK.nil+'}';
+    if(!s) return '{'+polyNK('nil')+'}';
     switch(s.k){
-      case 'local':     return '{'+NK.local+',{'+s.names.map(encStr).join(',')+'},{'+s.vals.map(sExpr).join(',')+'}}';;
-      case 'assign':    return '{'+NK.assign+',{'+s.targets.map(sExpr).join(',')+'},{'+s.vals.map(sExpr).join(',')+'}}';;
-      case 'do':        return '{'+NK.do+','+sBlock(s.body)+'}';
-      case 'while':     return '{'+NK.while+','+sExpr(s.cond)+','+sBlock(s.body)+'}';
-      case 'repeat':    return '{'+NK.repeat+','+sBlock(s.body)+','+sExpr(s.cond)+'}';
+      case 'local':     return '{'+polyNK('local')+',{'+s.names.map(encStr).join(',')+'},{'+s.vals.map(sExpr).join(',')+'}}';;
+      case 'assign':    return '{'+polyNK('assign')+',{'+s.targets.map(sExpr).join(',')+'},{'+s.vals.map(sExpr).join(',')+'}}';;
+      case 'do':        return '{'+polyNK('do')+','+sBlock(s.body)+'}';
+      case 'while':     return '{'+polyNK('while')+','+sExpr(s.cond)+','+sBlock(s.body)+'}';
+      case 'repeat':    return '{'+polyNK('repeat')+','+sBlock(s.body)+','+sExpr(s.cond)+'}';
       case 'if':        return sIf(s);
-      case 'numfor':    return '{'+NK.numfor+','+encStr(s.name)+','+sExpr(s.start)+','+sExpr(s.limit)
+      case 'numfor':    return '{'+polyNK('numfor')+','+encStr(s.name)+','+sExpr(s.start)+','+sExpr(s.limit)
                           +','+(s.step?sExpr(s.step):'false')+','+sBlock(s.body)+'}';
-      case 'genfor':    return '{'+NK.genfor+',{'+s.names.map(encStr).join(',')+'},{'+s.iters.map(sExpr).join(',')+'}'
+      case 'genfor':    return '{'+polyNK('genfor')+',{'+s.names.map(encStr).join(',')+'},{'+s.iters.map(sExpr).join(',')+'}'
                           +','+sBlock(s.body)+'}';
-      case 'funcdef':   return '{'+NK.funcdef+','+sExpr(s.target)+','+sExpr(s.func)+'}';
-      case 'localfunc': return '{'+NK.localfunc+','+encStr(s.name)+','+sExpr(s.func)+'}';
-      case 'return':    return '{'+NK.return+',{'+s.vals.map(sExpr).join(',')+'}}';
-      case 'break':     return '{'+NK.break+'}';
-      case 'continue':  return '{'+NK.continue+'}';
-      case 'callstat':  return '{'+NK.callstat+','+sExpr(s.e)+'}';
-      case 'label':     return '{'+NK.label+','+encStr(s.name)+'}';
-      case 'goto':      return '{'+NK.goto+','+encStr(s.name)+'}';
-      default: return '{'+NK.nil+'}';
+      case 'funcdef':   return '{'+polyNK('funcdef')+','+sExpr(s.target)+','+sExpr(s.func)+'}';
+      case 'localfunc': return '{'+polyNK('localfunc')+','+encStr(s.name)+','+sExpr(s.func)+'}';
+      case 'return':    return '{'+polyNK('return')+',{'+s.vals.map(sExpr).join(',')+'}}';
+      case 'break':     return '{'+polyNK('break')+'}';
+      case 'continue':  return '{'+polyNK('continue')+'}';
+      case 'callstat':  return '{'+polyNK('callstat')+','+sExpr(s.e)+'}';
+      case 'label':     return '{'+polyNK('label')+','+encStr(s.name)+'}';
+      case 'goto':      return '{'+polyNK('goto')+','+encStr(s.name)+'}';
+      default: return '{'+polyNK('nil')+'}';
     }
   }
   function sIf(s){
     const eis='{'+s.elseifs.map(function(ei){ return '{'+sExpr(ei.cond)+','+sBlock(ei.body)+'}'; }).join(',')+'}';
     const el=s.else_?sBlock(s.else_):'false';
-    return '{'+NK.if+','+sExpr(s.cond)+','+sBlock(s.then)+','+eis+','+el+'}';
+    return '{'+polyNK('if')+','+sExpr(s.cond)+','+sBlock(s.then)+','+eis+','+el+'}';
   }
   const astStr=sBlock(ast);
   return {astStr, strArr:_strArr};
 }
 
 // ─── VM GENERATOR ─────────────────────────────────────────────────────────────
-function generateVM(NK, OK, DEAD, astStr, strArr){
+function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
   // unique obfuscated name per semantic role
   const _usedNames=new Set();
   function rn(){
@@ -658,15 +670,16 @@ function generateVM(NK, OK, DEAD, astStr, strArr){
     'ie','we','de','re','taken','ei',
     // goto/label
     'lbl',
-    'S','ES','EKA','EKB','dI','dJ','dR','ki'
+    'S','ES','EKA','EKB','dI','dJ','dR','ki',
+    'NKDEC','accLen'
   ].forEach(function(name){ R[name]=rn(); });
 
   const G=R; // alias
 
-  // String encryption: position-dependent 2-array key (non-trivial XOR inversion)
+  // String encryption: position-dependent 2-array key + stateful length accumulator
   // EKA[i] = masterKey[i] ^ saltA[i]
   // EKB[i] = (saltA[i] + (i-1)*SMUL + SADD) % 256
-  // Recovery: inc=((ki-1)*SMUL+SADD)%256; salt=(EKB[ki]-inc+256)%256; key=EKA[ki]^salt
+  // Stateful: ki offset shifts by cumulative decoded string lengths (breaks static decryption)
   const KEY_LEN=16;
   const masterKey=Array.from({length:KEY_LEN},function(){ return Math.floor(Math.random()*254)+1; });
   const saltA=Array.from({length:KEY_LEN},function(){ return Math.floor(Math.random()*254)+1; });
@@ -674,38 +687,67 @@ function generateVM(NK, OK, DEAD, astStr, strArr){
   const SADD=Math.floor(Math.random()*60)+20;
   const keyA=masterKey.map(function(b,i){ return b^saltA[i]; });
   const keyB=saltA.map(function(s,i){ return (s+(i*SMUL+SADD))%256; });
-  // Dead array helper for dummy branches in generated VM
-  let _deadIdx=0;
-  function deadExprBranch(){ const d=DEAD[_deadIdx++%DEAD.length]; return '  elseif '+G.nk+'=='+d+' then local _='+G.nk; }
-  function deadBlockBranch(){ const d=DEAD[_deadIdx++%DEAD.length]; return '    elseif '+G.sk+'=='+d+' then local _='+G.sk; }
-  function encryptStr(s,idx){
-    const bytes=[];
-    for(let j=0;j<s.length;j++) bytes.push((s.charCodeAt(j)&0xFF)^masterKey[(idx+j)%KEY_LEN]);
-    return bytes;
+  // AST opcode XOR mask — every opcode stored in AST is XOR'd with AOXR;
+  // VM decodes with bit32.bxor(s[1], AOXR) before dispatch table lookup
+  const AOXR=Math.floor(Math.random()*253)+1;
+  // Build NKDEC: maps XOR'd(canonical|alias) → canonical NK value
+  const nkdecEntries=[];
+  for(const kind of Object.keys(NK)){
+    const canonical=NK[kind];
+    for(const v of [canonical,...NK_ALIASES[kind]]){
+      nkdecEntries.push('['+(v^AOXR)+']='+canonical);
+    }
   }
+  // Advanced opaque predicates — always-false math conditions for dead branches
+  function genOpaqueAlwaysFalse(){
+    const N=Math.floor(Math.random()*0xEEEE)+0x1111;
+    const V=N&0xFF;
+    const badV=(V+1)&0xFF;
+    return 'bit32.band('+N+',255)=='+badV;
+  }
+  let _deadIdx=0;
+  function deadExprBranch(){ const d=DEAD[_deadIdx++%DEAD.length]; return '  elseif '+G.nk+'=='+d+' and '+genOpaqueAlwaysFalse()+' then local _='+G.nk; }
+  function deadBlockBranch(){ const d=DEAD[_deadIdx++%DEAD.length]; return '    elseif '+G.sk+'=='+d+' and '+genOpaqueAlwaysFalse()+' then local _='+G.sk; }
   function luaByteLiteral(bytes){
     if(bytes.length===0) return '""';
     return '"'+bytes.map(function(b){ return '\\'+b; }).join('')+'"';
   }
-  const encStrs=strArr.map(function(s,i){ return luaByteLiteral(encryptStr(s,i+1)); });
+  // Stateful string encryption: running accLen shifts ki index each string
+  let _sAccLen=0;
+  const encStrs=strArr.map(function(s,i){
+    const bytes=[];
+    const idx=i+1;
+    for(let j=0;j<s.length;j++){
+      const ki=(idx+j+_sAccLen)%KEY_LEN;
+      bytes.push((s.charCodeAt(j)&0xFF)^masterKey[ki]);
+    }
+    _sAccLen=(_sAccLen+s.length)%KEY_LEN;
+    return luaByteLiteral(bytes);
+  });
   const safeAstStr=astStr.replace(/_S\[/g,G.S+'[');
   const setupLines=[
     'local _GENV=getgenv and getgenv() or _G',
+    // Anti-tamper: verify critical builtins behave correctly
+    'do local _t={} local _ok=type(type)=="function" and type(rawget(_t,1))=="nil" and type(true)=="boolean" if not _ok then return end end',
     'local '+G.EKA+'={'+keyA.join(',')+'}',
     'local '+G.EKB+'={'+keyB.join(',')+'}',
     'local '+G.ES+'={'+encStrs.join(',')+'}',
     'local '+G.S+'={}',
+    'local '+G.accLen+'=0',
     'for '+G.dI+'=1,#'+G.ES+' do',
     '  local '+G.dR+'={}',
     '  for '+G.dJ+'=1,#'+G.ES+'['+G.dI+'] do',
-    '    local '+G.ki+'=('+G.dI+'+'+G.dJ+'-1)%'+KEY_LEN+'+1',
+    '    local '+G.ki+'=('+G.dI+'+'+G.dJ+'-1+'+G.accLen+')%'+KEY_LEN+'+1',
     '    local _inc=(('+G.ki+'-1)*'+SMUL+'+'+SADD+')%256',
     '    local _sa=('+G.EKB+'['+G.ki+']-_inc+256)%256',
     '    '+G.dR+'['+G.dJ+']=string.char(bit32.bxor(string.byte('+G.ES+'['+G.dI+'],'+G.dJ+'),bit32.bxor('+G.EKA+'['+G.ki+'],_sa)))',
     '  end',
+    '  '+G.accLen+'=('+G.accLen+'+#'+G.dR+')%'+KEY_LEN,
     '  '+G.S+'['+G.dI+']=table.concat('+G.dR+')',
     'end',
-    G.EKA+'=nil '+G.EKB+'=nil '+G.ES+'=nil',
+    G.EKA+'=nil '+G.EKB+'=nil '+G.ES+'=nil '+G.accLen+'=nil',
+    // NKDEC dispatch table: maps XOR'd(polyopcode) → canonical NK value
+    'local '+G.NKDEC+'={'+nkdecEntries.join(',')+'}',
   ];
 
   const innerLines = [
@@ -738,7 +780,7 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '',
 G.evalExpr+'=function('+G.n+','+G.env+')',
 '  local '+G.op+'='+G.n+'[1]',
-'  local '+G.nk+'='+G.op,
+'  local '+G.nk+'='+G.NKDEC+'[bit32.bxor('+G.op+','+AOXR+')]',
 '  if '+G.nk+'=='+NK['nil']+' then return nil',
 '  elseif '+G.nk+'=='+NK['true']+' then return true',
 '  elseif '+G.nk+'=='+NK['false']+' then return false',
@@ -766,7 +808,7 @@ deadExprBranch(),
 '  elseif '+G.nk+'=='+NK['tbl']+' then',
 '    local '+G.r+'={} local '+G.ai+'=1',
 '    for _,'+G.fldNode+' in ipairs('+G.n+'[2]) do',
-'      local '+G.fldKind+'='+G.fldNode+'[1]',
+'      local '+G.fldKind+'='+G.NKDEC+'[bit32.bxor('+G.fldNode+'[1],'+AOXR+')]',
 '      if '+G.fldKind+'=='+NK['kv']+' then',
 '        '+G.r+'['+G.evalExpr+'('+G.fldNode+'[2],'+G.env+')]='+G.evalExpr+'('+G.fldNode+'[3],'+G.env+')',
 '      elseif '+G.fldKind+'=='+NK['nv']+' then',
@@ -893,12 +935,12 @@ G.evalBlock+'=function('+G.n+','+G.env+')',
 '  local '+G.stmts+'='+G.n+'[2]',
 '  local '+G.labels+'={}',
 '  for _,'+G.s+' in ipairs('+G.stmts+') do',
-'    if '+G.s+'[1]=='+NK['label']+' then '+G.labels+'['+G.s+'[2]]=_ end',
+'    if '+G.NKDEC+'[bit32.bxor('+G.s+'[1],'+AOXR+')]=='+NK['label']+' then '+G.labels+'['+G.s+'[2]]=_ end',
 '  end',
 '  local '+G.si+'=1',
 '  while '+G.si+'<=#'+G.stmts+' do',
 '    local '+G.s+'='+G.stmts+'['+G.si+']',
-'    local '+G.sk+'='+G.s+'[1]',
+'    local '+G.sk+'='+G.NKDEC+'[bit32.bxor('+G.s+'[1],'+AOXR+')]',
 '    local _j=true',
 '    if '+G.sk+'=='+NK['callstat']+' then',
 '      '+G.evalExpr+'('+G.s+'[2],'+G.env+')',
@@ -924,7 +966,7 @@ G.evalBlock+'=function('+G.n+','+G.env+')',
 '        else _ec=_ec+1 '+G.ev+'[_ec]='+G.evalExpr+'(_vn,'+G.env+') end',
 '      end',
 '      for '+G.j+','+G.tg+' in ipairs('+G.s+'[2]) do',
-'        local '+G.tnk+'='+G.tg+'[1]',
+'        local '+G.tnk+'='+G.NKDEC+'[bit32.bxor('+G.tg+'[1],'+AOXR+')]',
 '        if '+G.tnk+'=='+NK['name']+' then',
 '          '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.ev+'['+G.j+'])',
 '        elseif '+G.tnk+'=='+NK['field']+' then',
@@ -1040,7 +1082,7 @@ deadBlockBranch(),
 '    elseif '+G.sk+'=='+NK['funcdef']+' then',
 '      local '+G.fn+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')',
 '      local '+G.tg+'='+G.s+'[2]',
-'      local '+G.tnk+'='+G.tg+'[1]',
+'      local '+G.tnk+'='+G.NKDEC+'[bit32.bxor('+G.tg+'[1],'+AOXR+')]',
 '      if '+G.tnk+'=='+NK['name']+' then '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.fn+')',
 '      elseif '+G.tnk+'=='+NK['field']+' then',
 '        local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')',
@@ -1090,9 +1132,9 @@ close+')',
 function obfuscateVM(src){
   const tokens = tokenize(src);
   const ast    = parse(tokens);
-  const {NK,OK,DEAD} = genOpcodeMap();
-  const {astStr,strArr} = serializeAST(ast, NK, OK);
-  return generateVM(NK, OK, DEAD, astStr, strArr);
+  const {NK,NK_ALIASES,OK,DEAD} = genOpcodeMap();
+  const {astStr,strArr} = serializeAST(ast, NK, NK_ALIASES, OK);
+  return generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr);
 }
 </script>
 </body>
