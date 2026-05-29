@@ -795,6 +795,22 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     astDk=(astDk*AST_MULT+b+AST_ADD)%AST_MOD;
   }
   const encAstLiteral=luaByteLiteral(encAstBytes);
+  // Feed EKA, EKB, and NKDEC values into tamper checksum
+  for(const v of keyA) _tChk=(_tChk*TMUL+v+1)%TMOD;
+  for(const v of keyB) _tChk=(_tChk*TMUL+v+1)%TMOD;
+  // NKDEC: collect all (xorKey, canonical) pairs, sort by xorKey to match Lua's sorted iteration
+  const nkdecPairs=[];
+  for(const kind of Object.keys(NK)){
+    const canonical=NK[kind];
+    for(const v of [canonical,...NK_ALIASES[kind]]){
+      nkdecPairs.push({k:v^AOXR, v:canonical});
+    }
+  }
+  nkdecPairs.sort(function(a,b){ return a.k-b.k; });
+  for(const p of nkdecPairs){
+    _tChk=(_tChk*TMUL+p.k+1)%TMOD;
+    _tChk=(_tChk*TMUL+p.v+1)%TMOD;
+  }
   const setupLines=[
     'local _GENV=getgenv and getgenv() or _G',
     'local '+G.EKA+'={'+keyA.join(',')+'}',
@@ -1298,6 +1314,19 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 'for '+G.tI+'=1,#'+G.EAST+' do',
 '  '+G.tCk+'=('+G.tCk+'*'+TMUL+'+string.byte('+G.EAST+','+G.tI+')+1)%'+TMOD,
 'end',
+// Hash EKA and EKB arrays
+'for '+G.tI+'=1,#'+G.EKA+' do',
+'  '+G.tCk+'=('+G.tCk+'*'+TMUL+'+'+G.EKA+'['+G.tI+']+1)%'+TMOD,
+'end',
+'for '+G.tI+'=1,#'+G.EKB+' do',
+'  '+G.tCk+'=('+G.tCk+'*'+TMUL+'+'+G.EKB+'['+G.tI+']+1)%'+TMOD,
+'end',
+// Hash NKDEC table (opcode mapping) — sorted keys for deterministic order
+'do local _ks={} for '+G.tI+' in pairs('+G.NKDEC+') do _ks[#_ks+1]='+G.tI+' end table.sort(_ks)',
+'for _,'+G.tI+' in ipairs(_ks) do',
+'  '+G.tCk+'=('+G.tCk+'*'+TMUL+'+'+G.tI+'+1)%'+TMOD,
+'  '+G.tCk+'=('+G.tCk+'*'+TMUL+'+'+G.NKDEC+'['+G.tI+']+1)%'+TMOD,
+'end end',
 'if '+G.tCk+'~='+_tChk+' then',
 '  for '+G.tI+'=1,#'+G.EKA+' do '+G.EKA+'['+G.tI+']=bit32.bxor('+G.EKA+'['+G.tI+'],171) end',
 'end end',
