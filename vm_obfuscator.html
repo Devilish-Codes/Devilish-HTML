@@ -671,7 +671,8 @@ function generateVM(NK, NK_ALIASES, OK, DEAD, astStr, strArr){
     // goto/label
     'lbl',
     'S','ES','EKA','EKB','dI','dJ','dR','ki',
-    'NKDEC','accLen'
+    'NKDEC','accLen',
+    'ED','BD','_sig','_vals','_nsi'
   ].forEach(function(name){ R[name]=rn(); });
 
   const G=R; // alias
@@ -776,332 +777,416 @@ G.setVar+'=function('+G.env+','+G.k+','+G.v+')',
 '  _GENV['+G.k+']='+G.v,
 'end',
 '',
-G.evalExpr+'=function('+G.n+','+G.env+')',
-'  local '+G.op+'='+G.n+'[1]',
-'  local '+G.nk+'='+G.NKDEC+'[bit32.bxor('+G.op+','+AOXR+')]',
-'  if '+G.nk+'=='+NK['nil']+' then return nil',
-'  elseif '+G.nk+'=='+NK['true']+' then return true',
-'  elseif '+G.nk+'=='+NK['false']+' then return false',
-'  elseif '+G.nk+'=='+NK['num']+' then return '+G.n+'[2]',
-deadExprBranch(),
-'  elseif '+G.nk+'=='+NK['str']+' then return '+G.n+'[2]',
-'  elseif '+G.nk+'=='+NK['vararg']+' then return table.unpack('+G.env+'._v.__vararg or {})',
-deadExprBranch(),
-'  elseif '+G.nk+'=='+NK['paren']+' then',
-'    local '+G.v+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
-'    if type('+G.v+')=="table" and getmetatable('+G.v+')=='+G.MRET+' then return '+G.v+'[1] end',
-'    return '+G.v,
-'  elseif '+G.nk+'=='+NK['name']+' then',
-'    return '+G.getVar+'('+G.env+','+G.n+'[2])',
-'  elseif '+G.nk+'=='+NK['field']+' then',
-'    local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
-'    if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end',
-'    return '+G.obj+'['+G.n+'[3]]',
-'  elseif '+G.nk+'=='+NK['index']+' then',
-'    local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
-'    if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end',
-'    local '+G.idx+'='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
-'    return '+G.obj+'['+G.idx+']',
-deadExprBranch(),
-'  elseif '+G.nk+'=='+NK['tbl']+' then',
-'    local '+G.r+'={} local '+G.ai+'=1',
-'    for _,'+G.fldNode+' in ipairs('+G.n+'[2]) do',
-'      local '+G.fldKind+'='+G.NKDEC+'[bit32.bxor('+G.fldNode+'[1],'+AOXR+')]',
-'      if '+G.fldKind+'=='+NK['kv']+' then',
-'        '+G.r+'['+G.evalExpr+'('+G.fldNode+'[2],'+G.env+')]='+G.evalExpr+'('+G.fldNode+'[3],'+G.env+')',
-'      elseif '+G.fldKind+'=='+NK['nv']+' then',
-'        '+G.r+'['+G.fldNode+'[2]]='+G.evalExpr+'('+G.fldNode+'[3],'+G.env+')',
-'      else',
-'        local '+G.v+'='+G.evalExpr+'('+G.fldNode+'[2],'+G.env+')',
-'        if type('+G.v+')=="table" and getmetatable('+G.v+')=='+G.MRET+' then',
-'          for _,_x in ipairs('+G.v+') do '+G.r+'['+G.ai+']=_x '+G.ai+'='+G.ai+'+1 end',
-'        else '+G.r+'['+G.ai+']='+G.v+' '+G.ai+'='+G.ai+'+1 end',
-'      end',
-'    end',
-'    return '+G.r,
-'  elseif '+G.nk+'=='+NK['func']+' then',
-'    local '+G.params+','+G.isVA+','+G.body+'='+G.n+'[2],'+G.n+'[3],'+G.n+'[4]',
-'    local '+G.capEnv+'='+G.env,
-'    return function(...)',
-'      local '+G.fargs+'={...}',
-'      local '+G.fenv+'='+G.makeEnv+'('+G.capEnv+',nil)',
-'      for _i,_pn in ipairs('+G.params+') do '+G.fenv+'._v[_pn]='+G.fargs+'[_i] '+G.fenv+'._d[_pn]=true end',
-'      if '+G.isVA+' then',
-'        local '+G.va+'={}',
-'        for _i=#'+G.params+'+1,#'+G.fargs+' do '+G.va+'[#'+G.va+'+1]='+G.fargs+'[_i] end',
-'        '+G.fenv+'._v.__vararg='+G.va+' '+G.fenv+'._d.__vararg=true',
-'      end',
-'      local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.body+','+G.fenv+')',
-'      if '+G.sig+'=='+G.CF2+' then',
-'        if type('+G.vals+')=="table" and #'+G.vals+'>0 then return table.unpack('+G.vals+') end',
-'      end',
-'    end',
-'  elseif '+G.nk+'=='+NK['call']+' then',
-'    local '+G.fn+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
-'    local '+G.as+'={} local _nc=0',
-'    for _i,_a in ipairs('+G.n+'[3]) do',
-'      if _i==#'+G.n+'[3] then',
-'        local _lv='+G.evalExpr+'(_a,'+G.env+')',
-'        if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
-'          for _,_x in ipairs(_lv) do _nc=_nc+1 '+G.as+'[_nc]=_x end',
-'        else _nc=_nc+1 '+G.as+'[_nc]=_lv end',
-'      else _nc=_nc+1 '+G.as+'[_nc]='+G.evalExpr+'(_a,'+G.env+') end',
-'    end',
-'    local '+G.rv+'=table.pack(pcall('+G.fn+',table.unpack('+G.as+',1,_nc)))',
-'    if not '+G.rv+'[1] then error('+G.rv+'[2],0) end',
-'    if '+G.rv+'.n>2 then',
-'      local '+G.mt+'=setmetatable({},'+G.MRET+')',
-'      for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end',
-'      return '+G.mt,
-'    end',
-'    return '+G.rv+'[2]',
-deadExprBranch(),
-'  elseif '+G.nk+'=='+NK['callm']+' then',
-'    local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')',
-'    if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end',
-'    local '+G.fn+'='+G.obj+'['+G.n+'[3]]',
-'    local '+G.as+'={'+G.obj+'} local _nc=1',
-'    for _i,_a in ipairs('+G.n+'[4]) do',
-'      if _i==#'+G.n+'[4] then',
-'        local _lv='+G.evalExpr+'(_a,'+G.env+')',
-'        if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
-'          for _,_x in ipairs(_lv) do _nc=_nc+1 '+G.as+'[_nc]=_x end',
-'        else _nc=_nc+1 '+G.as+'[_nc]=_lv end',
-'      else _nc=_nc+1 '+G.as+'[_nc]='+G.evalExpr+'(_a,'+G.env+') end',
-'    end',
-'    local '+G.rv+'=table.pack(pcall('+G.fn+',table.unpack('+G.as+',1,_nc)))',
-'    if not '+G.rv+'[1] then error('+G.rv+'[2],0) end',
-'    if '+G.rv+'.n>2 then',
-'      local '+G.mt+'=setmetatable({},'+G.MRET+')',
-'      for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end',
-'      return '+G.mt,
-'    end',
-'    return '+G.rv+'[2]',
-'  elseif '+G.nk+'=='+NK['binop']+' then',
-'    local _bop='+G.n+'[2]',
-'    if _bop=='+OK['and']+' then',
-'      local _lv='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
-'      local _lc=_lv if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then _lc=_lv[1] end',
-'      if not _lc then return _lv end',
-'      return '+G.evalExpr+'('+G.n+'[4],'+G.env+')',
-'    elseif _bop=='+OK['or']+' then',
-'      local _lv='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
-'      local _lc=_lv if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then _lc=_lv[1] end',
-'      if _lc then return _lv end',
-'      return '+G.evalExpr+'('+G.n+'[4],'+G.env+')',
-'    end',
-'    local _l='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
-'    local _r='+G.evalExpr+'('+G.n+'[4],'+G.env+')',
-'    if type(_l)=="table" and getmetatable(_l)=='+G.MRET+' then _l=_l[1] end',
-'    if type(_r)=="table" and getmetatable(_r)=='+G.MRET+' then _r=_r[1] end',
-'    if _bop=='+OK['+']+' then return _l+_r',
-'    elseif _bop=='+OK['-']+' then return _l-_r',
-'    elseif _bop=='+OK['*']+' then return _l*_r',
-'    elseif _bop=='+OK['/']+' then return _l/_r',
-'    elseif _bop=='+OK['%']+' then return _l%_r',
-'    elseif _bop=='+OK['..']+' then return tostring(_l)..tostring(_r)',
-'    elseif _bop=='+OK['^']+' then return _l^_r',
-'    elseif _bop=='+OK['<']+' then return _l<_r',
-'    elseif _bop=='+OK['>']+' then return _l>_r',
-'    elseif _bop=='+OK['<=']+' then return _l<=_r',
-'    elseif _bop=='+OK['>=']+' then return _l>=_r',
-'    elseif _bop=='+OK['==']+' then return _l==_r',
-'    elseif _bop=='+OK['~=']+' then return _l~=_r',
-'    elseif _bop=='+OK['//']+' then return math.floor(_l/_r)',
-'    elseif _bop=='+OK['&']+' then return bit32.band(_l,_r)',
-'    elseif _bop=='+OK['|']+' then return bit32.bor(_l,_r)',
-'    elseif _bop=='+OK['~']+' then return bit32.bxor(_l,_r)',
-'    elseif _bop=='+OK['>>']+' then return bit32.rshift(_l,_r)',
-'    elseif _bop=='+OK['<<']+' then return bit32.lshift(_l,_r)',
-'    end',
-'  elseif '+G.nk+'=='+NK['unop']+' then',
-'    local _uop='+G.n+'[2]',
-'    local _v='+G.evalExpr+'('+G.n+'[3],'+G.env+')',
-'    if type(_v)=="table" and getmetatable(_v)=='+G.MRET+' then _v=_v[1] end',
-'    if _uop=='+OK['not']+' then return not _v',
-'    elseif _uop=='+OK['-u']+' then return -_v',
-'    elseif _uop=='+OK['#']+' then return #_v',
-'    elseif _uop=='+OK['~u']+' then return bit32.bnot(_v)',
-'    end',
-deadExprBranch(),
-'  elseif '+G.nk+'=='+NK['dead']+' then return nil',
-'  end',
-'  return nil',
-'end',
+// ── evalExpr dispatch table (CFF) ──
+...(function(){
+  // Build handler entries: [nkValue] = function(n, env) ... end
+  const handlers = [];
+  handlers.push({key:NK['nil'], code:
+'function('+G.n+','+G.env+') return nil end'});
+  handlers.push({key:NK['true'], code:
+'function('+G.n+','+G.env+') return true end'});
+  handlers.push({key:NK['false'], code:
+'function('+G.n+','+G.env+') return false end'});
+  handlers.push({key:NK['num'], code:
+'function('+G.n+','+G.env+') return '+G.n+'[2] end'});
+  handlers.push({key:NK['str'], code:
+'function('+G.n+','+G.env+') return '+G.n+'[2] end'});
+  handlers.push({key:NK['vararg'], code:
+'function('+G.n+','+G.env+') return table.unpack('+G.env+'._v.__vararg or {}) end'});
+  handlers.push({key:NK['paren'], code:
+'function('+G.n+','+G.env+')'+
+' local '+G.v+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
+' if type('+G.v+')=="table" and getmetatable('+G.v+')=='+G.MRET+' then return '+G.v+'[1] end'+
+' return '+G.v+' end'});
+  handlers.push({key:NK['name'], code:
+'function('+G.n+','+G.env+') return '+G.getVar+'('+G.env+','+G.n+'[2]) end'});
+  handlers.push({key:NK['field'], code:
+'function('+G.n+','+G.env+')'+
+' local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
+' if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end'+
+' return '+G.obj+'['+G.n+'[3]] end'});
+  handlers.push({key:NK['index'], code:
+'function('+G.n+','+G.env+')'+
+' local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
+' if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end'+
+' local '+G.idx+'='+G.evalExpr+'('+G.n+'[3],'+G.env+')'+
+' return '+G.obj+'['+G.idx+'] end'});
+  handlers.push({key:NK['tbl'], code:
+'function('+G.n+','+G.env+')'+
+' local '+G.r+'={} local '+G.ai+'=1'+
+' for _,'+G.fldNode+' in ipairs('+G.n+'[2]) do'+
+'  local '+G.fldKind+'='+G.NKDEC+'[bit32.bxor('+G.fldNode+'[1],'+AOXR+')]'+
+'  if '+G.fldKind+'=='+NK['kv']+' then'+
+'   '+G.r+'['+G.evalExpr+'('+G.fldNode+'[2],'+G.env+')]='+G.evalExpr+'('+G.fldNode+'[3],'+G.env+')'+
+'  elseif '+G.fldKind+'=='+NK['nv']+' then'+
+'   '+G.r+'['+G.fldNode+'[2]]='+G.evalExpr+'('+G.fldNode+'[3],'+G.env+')'+
+'  else'+
+'   local '+G.v+'='+G.evalExpr+'('+G.fldNode+'[2],'+G.env+')'+
+'   if type('+G.v+')=="table" and getmetatable('+G.v+')=='+G.MRET+' then'+
+'    for _,_x in ipairs('+G.v+') do '+G.r+'['+G.ai+']=_x '+G.ai+'='+G.ai+'+1 end'+
+'   else '+G.r+'['+G.ai+']='+G.v+' '+G.ai+'='+G.ai+'+1 end'+
+'  end'+
+' end'+
+' return '+G.r+' end'});
+  handlers.push({key:NK['func'], code:
+'function('+G.n+','+G.env+')'+
+' local '+G.params+','+G.isVA+','+G.body+'='+G.n+'[2],'+G.n+'[3],'+G.n+'[4]'+
+' local '+G.capEnv+'='+G.env+
+' return function(...)'+
+'  local '+G.fargs+'={...}'+
+'  local '+G.fenv+'='+G.makeEnv+'('+G.capEnv+',nil)'+
+'  for _i,_pn in ipairs('+G.params+') do '+G.fenv+'._v[_pn]='+G.fargs+'[_i] '+G.fenv+'._d[_pn]=true end'+
+'  if '+G.isVA+' then'+
+'   local '+G.va+'={}'+
+'   for _i=#'+G.params+'+1,#'+G.fargs+' do '+G.va+'[#'+G.va+'+1]='+G.fargs+'[_i] end'+
+'   '+G.fenv+'._v.__vararg='+G.va+' '+G.fenv+'._d.__vararg=true'+
+'  end'+
+'  local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.body+','+G.fenv+')'+
+'  if '+G.sig+'=='+G.CF2+' then'+
+'   if type('+G.vals+')=="table" and #'+G.vals+'>0 then return table.unpack('+G.vals+') end'+
+'  end'+
+' end'+
+' end'});
+  handlers.push({key:NK['call'], code:
+'function('+G.n+','+G.env+')'+
+' local '+G.fn+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
+' local '+G.as+'={} local _nc=0'+
+' for _i,_a in ipairs('+G.n+'[3]) do'+
+'  if _i==#'+G.n+'[3] then'+
+'   local _lv='+G.evalExpr+'(_a,'+G.env+')'+
+'   if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then'+
+'    for _,_x in ipairs(_lv) do _nc=_nc+1 '+G.as+'[_nc]=_x end'+
+'   else _nc=_nc+1 '+G.as+'[_nc]=_lv end'+
+'  else _nc=_nc+1 '+G.as+'[_nc]='+G.evalExpr+'(_a,'+G.env+') end'+
+' end'+
+' local '+G.rv+'=table.pack(pcall('+G.fn+',table.unpack('+G.as+',1,_nc)))'+
+' if not '+G.rv+'[1] then error('+G.rv+'[2],0) end'+
+' if '+G.rv+'.n>2 then'+
+'  local '+G.mt+'=setmetatable({},'+G.MRET+')'+
+'  for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end'+
+'  return '+G.mt+
+' end'+
+' return '+G.rv+'[2] end'});
+  handlers.push({key:NK['callm'], code:
+'function('+G.n+','+G.env+')'+
+' local '+G.obj+'='+G.evalExpr+'('+G.n+'[2],'+G.env+')'+
+' if type('+G.obj+')=="table" and getmetatable('+G.obj+')=='+G.MRET+' then '+G.obj+'='+G.obj+'[1] end'+
+' local '+G.fn+'='+G.obj+'['+G.n+'[3]]'+
+' local '+G.as+'={'+G.obj+'} local _nc=1'+
+' for _i,_a in ipairs('+G.n+'[4]) do'+
+'  if _i==#'+G.n+'[4] then'+
+'   local _lv='+G.evalExpr+'(_a,'+G.env+')'+
+'   if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then'+
+'    for _,_x in ipairs(_lv) do _nc=_nc+1 '+G.as+'[_nc]=_x end'+
+'   else _nc=_nc+1 '+G.as+'[_nc]=_lv end'+
+'  else _nc=_nc+1 '+G.as+'[_nc]='+G.evalExpr+'(_a,'+G.env+') end'+
+' end'+
+' local '+G.rv+'=table.pack(pcall('+G.fn+',table.unpack('+G.as+',1,_nc)))'+
+' if not '+G.rv+'[1] then error('+G.rv+'[2],0) end'+
+' if '+G.rv+'.n>2 then'+
+'  local '+G.mt+'=setmetatable({},'+G.MRET+')'+
+'  for _i=2,'+G.rv+'.n do '+G.mt+'[_i-1]='+G.rv+'[_i] end'+
+'  return '+G.mt+
+' end'+
+' return '+G.rv+'[2] end'});
+  handlers.push({key:NK['binop'], code:
+'function('+G.n+','+G.env+')'+
+' local _bop='+G.n+'[2]'+
+' if _bop=='+OK['and']+' then'+
+'  local _lv='+G.evalExpr+'('+G.n+'[3],'+G.env+')'+
+'  local _lc=_lv if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then _lc=_lv[1] end'+
+'  if not _lc then return _lv end'+
+'  return '+G.evalExpr+'('+G.n+'[4],'+G.env+')'+
+' elseif _bop=='+OK['or']+' then'+
+'  local _lv='+G.evalExpr+'('+G.n+'[3],'+G.env+')'+
+'  local _lc=_lv if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then _lc=_lv[1] end'+
+'  if _lc then return _lv end'+
+'  return '+G.evalExpr+'('+G.n+'[4],'+G.env+')'+
+' end'+
+' local _l='+G.evalExpr+'('+G.n+'[3],'+G.env+')'+
+' local _r='+G.evalExpr+'('+G.n+'[4],'+G.env+')'+
+' if type(_l)=="table" and getmetatable(_l)=='+G.MRET+' then _l=_l[1] end'+
+' if type(_r)=="table" and getmetatable(_r)=='+G.MRET+' then _r=_r[1] end'+
+' if _bop=='+OK['+']+' then return _l+_r'+
+' elseif _bop=='+OK['-']+' then return _l-_r'+
+' elseif _bop=='+OK['*']+' then return _l*_r'+
+' elseif _bop=='+OK['/']+' then return _l/_r'+
+' elseif _bop=='+OK['%']+' then return _l%_r'+
+' elseif _bop=='+OK['..']+' then return tostring(_l)..tostring(_r)'+
+' elseif _bop=='+OK['^']+' then return _l^_r'+
+' elseif _bop=='+OK['<']+' then return _l<_r'+
+' elseif _bop=='+OK['>']+' then return _l>_r'+
+' elseif _bop=='+OK['<=']+' then return _l<=_r'+
+' elseif _bop=='+OK['>=']+' then return _l>=_r'+
+' elseif _bop=='+OK['==']+' then return _l==_r'+
+' elseif _bop=='+OK['~=']+' then return _l~=_r'+
+' elseif _bop=='+OK['//']+' then return math.floor(_l/_r)'+
+' elseif _bop=='+OK['&']+' then return bit32.band(_l,_r)'+
+' elseif _bop=='+OK['|']+' then return bit32.bor(_l,_r)'+
+' elseif _bop=='+OK['~']+' then return bit32.bxor(_l,_r)'+
+' elseif _bop=='+OK['>>']+' then return bit32.rshift(_l,_r)'+
+' elseif _bop=='+OK['<<']+' then return bit32.lshift(_l,_r)'+
+' end end'});
+  handlers.push({key:NK['unop'], code:
+'function('+G.n+','+G.env+')'+
+' local _uop='+G.n+'[2]'+
+' local _v='+G.evalExpr+'('+G.n+'[3],'+G.env+')'+
+' if type(_v)=="table" and getmetatable(_v)=='+G.MRET+' then _v=_v[1] end'+
+' if _uop=='+OK['not']+' then return not _v'+
+' elseif _uop=='+OK['-u']+' then return -_v'+
+' elseif _uop=='+OK['#']+' then return #_v'+
+' elseif _uop=='+OK['~u']+' then return bit32.bnot(_v)'+
+' end end'});
+  handlers.push({key:NK['dead'], code:
+'function() return nil end'});
+  // Add dead opcode entries with opaque predicates
+  for(let di=0;di<DEAD.length && di<4;di++){
+    handlers.push({key:DEAD[di], code:
+'function() if '+genOpaqueAlwaysFalse()+' then return 1 end return nil end'});
+  }
+  // Shuffle handler registration order
+  for(let i=handlers.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    const tmp=handlers[i]; handlers[i]=handlers[j]; handlers[j]=tmp;
+  }
+  // Emit dispatch table + evalExpr function
+  const lines=[];
+  lines.push('local '+G.ED+'={}');
+  for(const h of handlers){
+    lines.push(G.ED+'['+h.key+']='+h.code);
+  }
+  lines.push(G.evalExpr+'=function('+G.n+','+G.env+')');
+  lines.push('  local '+G.nk+'='+G.NKDEC+'[bit32.bxor('+G.n+'[1],'+AOXR+')]');
+  lines.push('  local _h='+G.ED+'['+G.nk+']');
+  lines.push('  if _h then return _h('+G.n+','+G.env+') end');
+  lines.push('  return nil');
+  lines.push('end');
+  return lines;
+})(),
 '',
-G.evalBlock+'=function('+G.n+','+G.env+')',
-'  local '+G.stmts+'='+G.n+'[2]',
-'  local '+G.labels+'={}',
-'  for _,'+G.s+' in ipairs('+G.stmts+') do',
-'    if '+G.NKDEC+'[bit32.bxor('+G.s+'[1],'+AOXR+')]=='+NK['label']+' then '+G.labels+'['+G.s+'[2]]=_ end',
-'  end',
-'  local '+G.si+'=1',
-'  while '+G.si+'<=#'+G.stmts+' do',
-'    local '+G.s+'='+G.stmts+'['+G.si+']',
-'    local '+G.sk+'='+G.NKDEC+'[bit32.bxor('+G.s+'[1],'+AOXR+')]',
-'    local _j=true',
-'    if '+G.sk+'=='+NK['callstat']+' then',
-'      '+G.evalExpr+'('+G.s+'[2],'+G.env+')',
-'    elseif '+G.sk+'=='+NK['local']+' then',
-'      local '+G.ev+'={} local _ec=0',
-'      for '+G.j+',_vn in ipairs('+G.s+'[3]) do',
-'        if '+G.j+'==#'+G.s+'[3] then',
-'          local _lv='+G.evalExpr+'(_vn,'+G.env+')',
-'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
-'            for _,_x in ipairs(_lv) do _ec=_ec+1 '+G.ev+'[_ec]=_x end',
-'          else _ec=_ec+1 '+G.ev+'[_ec]=_lv end',
-'        else _ec=_ec+1 '+G.ev+'[_ec]='+G.evalExpr+'(_vn,'+G.env+') end',
-'      end',
-'      for '+G.j+','+G.nm+' in ipairs('+G.s+'[2]) do '+G.env+'._v['+G.nm+']='+G.ev+'['+G.j+'] '+G.env+'._d['+G.nm+']=true end',
-'    elseif '+G.sk+'=='+NK['assign']+' then',
-'      local '+G.ev+'={} local _ec=0',
-'      for '+G.j+',_vn in ipairs('+G.s+'[3]) do',
-'        if '+G.j+'==#'+G.s+'[3] then',
-'          local _lv='+G.evalExpr+'(_vn,'+G.env+')',
-'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
-'            for _,_x in ipairs(_lv) do _ec=_ec+1 '+G.ev+'[_ec]=_x end',
-'          else _ec=_ec+1 '+G.ev+'[_ec]=_lv end',
-'        else _ec=_ec+1 '+G.ev+'[_ec]='+G.evalExpr+'(_vn,'+G.env+') end',
-'      end',
-'      for '+G.j+','+G.tg+' in ipairs('+G.s+'[2]) do',
-'        local '+G.tnk+'='+G.NKDEC+'[bit32.bxor('+G.tg+'[1],'+AOXR+')]',
-'        if '+G.tnk+'=='+NK['name']+' then',
-'          '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.ev+'['+G.j+'])',
-'        elseif '+G.tnk+'=='+NK['field']+' then',
-'          local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')',
-'          '+G.to+'['+G.tg+'[3]]='+G.ev+'['+G.j+']',
-'        elseif '+G.tnk+'=='+NK['index']+' then',
-'          local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')',
-'          local '+G.tk2+'='+G.evalExpr+'('+G.tg+'[3],'+G.env+')',
-'          '+G.to+'['+G.tk2+']='+G.ev+'['+G.j+']',
-'        end',
-'      end',
-deadBlockBranch(),
-'    elseif '+G.sk+'=='+NK['do']+' then',
-'      local '+G.de+'='+G.makeEnv+'('+G.env+',nil)',
-'      local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[2],'+G.de+')',
-'      if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
-'    elseif '+G.sk+'=='+NK['while']+' then',
-'      while true do',
-'        local _cwh='+G.evalExpr+'('+G.s+'[2],'+G.env+') if type(_cwh)=="table" and getmetatable(_cwh)=='+G.MRET+' then _cwh=_cwh[1] end if not _cwh then break end',
-'        local '+G.we+'='+G.makeEnv+'('+G.env+',nil)',
-'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[3],'+G.we+')',
-'        if '+G.sig+'=='+G.CF1+' then break end',
-'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
-'        if '+G.sig+'=='+G.CF3+' then',
-'          if '+G.labels+'['+G.vals+'] then '+G.si+'='+G.labels+'['+G.vals+'] break',
-'          else return '+G.sig+','+G.vals+' end',
-'        end',
-'      end',
-'    elseif '+G.sk+'=='+NK['repeat']+' then',
-'      repeat',
-'        local '+G.re+'='+G.makeEnv+'('+G.env+',nil)',
-'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[2],'+G.re+')',
-'        if '+G.sig+'=='+G.CF1+' then break end',
-'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
-'        local _crp='+G.evalExpr+'('+G.s+'[3],'+G.re+') if type(_crp)=="table" and getmetatable(_crp)=='+G.MRET+' then _crp=_crp[1] end',
-'        if _crp then break end',
-'      until false',
-'    elseif '+G.sk+'=='+NK['if']+' then',
-'      local '+G.taken+'=false',
-'      local _cif='+G.evalExpr+'('+G.s+'[2],'+G.env+') if type(_cif)=="table" and getmetatable(_cif)=='+G.MRET+' then _cif=_cif[1] end',
-'      if _cif then',
-'        '+G.taken+'=true',
-'        local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)',
-'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[3],'+G.ie+')',
-'        if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
-'      else',
-'        for _,'+G.ei+' in ipairs('+G.s+'[4]) do',
-'          local _cif='+G.evalExpr+'('+G.ei+'[1],'+G.env+') if type(_cif)=="table" and getmetatable(_cif)=='+G.MRET+' then _cif=_cif[1] end',
-'          if _cif then',
-'            '+G.taken+'=true',
-'            local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)',
-'            local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.ei+'[2],'+G.ie+')',
-'            if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
-'            break',
-'          end',
-'        end',
-'      end',
-'      if not '+G.taken+' and '+G.s+'[5] then',
-'        local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)',
-'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[5],'+G.ie+')',
-'        if '+G.sig+'~='+G.CF0+' then return '+G.sig+','+G.vals+' end',
-'      end',
-deadBlockBranch(),
-'    elseif '+G.sk+'=='+NK['numfor']+' then',
-'      local '+G.nm+'='+G.s+'[2]',
-'      local '+G.fi+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')',
-'      local '+G.lm+'='+G.evalExpr+'('+G.s+'[4],'+G.env+')',
-'      local '+G.sp+'='+G.s+'[5] and '+G.evalExpr+'('+G.s+'[5],'+G.env+') or 1',
-'      while ('+G.sp+'>0 and '+G.fi+'<='+G.lm+') or ('+G.sp+'<0 and '+G.fi+'>='+G.lm+') do',
-'        local '+G.ge+'='+G.makeEnv+'('+G.env+',nil)',
-'        '+G.ge+'._v['+G.nm+']='+G.fi+' '+G.ge+'._d['+G.nm+']=true',
-'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[6],'+G.ge+')',
-'        if '+G.sig+'=='+G.CF1+' then break end',
-'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
-'        '+G.fi+'='+G.fi+'+'+G.sp,
-'      end',
-'    elseif '+G.sk+'=='+NK['genfor']+' then',
-'      local '+G.ev+'={}',
-'      for '+G.j+',_it in ipairs('+G.s+'[3]) do',
-'        if '+G.j+'==#'+G.s+'[3] then',
-'          local _lv='+G.evalExpr+'(_it,'+G.env+')',
-'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
-'            for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end',
-'          else '+G.ev+'[#'+G.ev+'+1]=_lv end',
-'        else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_it,'+G.env+') end',
-'      end',
-'      local '+G.iterF+'='+G.ev+'[1] local '+G.iterS+'='+G.ev+'[2] local '+G.iterV+'='+G.ev+'[3]',
-'      while true do',
-'        local '+G.res+'=table.pack('+G.iterF+'('+G.iterS+','+G.iterV+'))',
-'        if '+G.res+'[1]==nil then break end',
-'        '+G.iterV+'='+G.res+'[1]',
-'        local '+G.ge+'='+G.makeEnv+'('+G.env+',nil)',
-'        for '+G.j+','+G.nm+' in ipairs('+G.s+'[2]) do '+G.ge+'._v['+G.nm+']='+G.res+'['+G.j+'] '+G.ge+'._d['+G.nm+']=true end',
-'        local '+G.sig+','+G.vals+'='+G.evalBlock+'('+G.s+'[4],'+G.ge+')',
-'        if '+G.sig+'=='+G.CF1+' then break end',
-'        if '+G.sig+'=='+G.CF2+' then return '+G.sig+','+G.vals+' end',
-'      end',
-'    elseif '+G.sk+'=='+NK['return']+' then',
-'      local '+G.ev+'={}',
-'      for '+G.j+',_rv in ipairs('+G.s+'[2]) do',
-'        if '+G.j+'==#'+G.s+'[2] then',
-'          local _lv='+G.evalExpr+'(_rv,'+G.env+')',
-'          if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then',
-'            for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end',
-'          else '+G.ev+'[#'+G.ev+'+1]=_lv end',
-'        else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_rv,'+G.env+') end',
-'      end',
-'      return '+G.CF2+','+G.ev,
-'    elseif '+G.sk+'=='+NK['break']+' then',
-'      return '+G.CF1+',nil',
-'    elseif '+G.sk+'=='+NK['continue']+' then',
-'      return '+G.CF4+',nil',
-'    elseif '+G.sk+'=='+NK['funcdef']+' then',
-'      local '+G.fn+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')',
-'      local '+G.tg+'='+G.s+'[2]',
-'      local '+G.tnk+'='+G.NKDEC+'[bit32.bxor('+G.tg+'[1],'+AOXR+')]',
-'      if '+G.tnk+'=='+NK['name']+' then '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.fn+')',
-'      elseif '+G.tnk+'=='+NK['field']+' then',
-'        local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')',
-'        '+G.to+'['+G.tg+'[3]]='+G.fn,
-'      end',
-'    elseif '+G.sk+'=='+NK['localfunc']+' then',
-'      '+G.env+'._d['+G.s+'[2]]=true '+G.env+'._v['+G.s+'[2]]=nil',
-'      '+G.env+'._v['+G.s+'[2]]='+G.evalExpr+'('+G.s+'[3],'+G.env+')',
-'    elseif '+G.sk+'=='+NK['label']+' then',
-'      -- indexed above',
-'    elseif '+G.sk+'=='+NK['goto']+' then',
-'      if '+G.labels+'['+G.s+'[2]] then',
-'        '+G.si+'='+G.labels+'['+G.s+'[2]]+1 _j=false',
-'      else return '+G.CF3+','+G.s+'[2] end',
-deadBlockBranch(),
-'    elseif '+G.sk+'=='+NK['dead']+' then local _='+G.sk,
-'    end',
-'    if _j then '+G.si+'='+G.si+'+1 end',
-'  end',
-'  return '+G.CF0+',nil',
-'end',
+// ── evalBlock dispatch table (CFF) ──
+...(function(){
+  const handlers = [];
+  handlers.push({key:NK['callstat'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' '+G.evalExpr+'('+G.s+'[2],'+G.env+')'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['local'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.ev+'={} local _ec=0'+
+' for '+G.j+',_vn in ipairs('+G.s+'[3]) do'+
+'  if '+G.j+'==#'+G.s+'[3] then'+
+'   local _lv='+G.evalExpr+'(_vn,'+G.env+')'+
+'   if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then'+
+'    for _,_x in ipairs(_lv) do _ec=_ec+1 '+G.ev+'[_ec]=_x end'+
+'   else _ec=_ec+1 '+G.ev+'[_ec]=_lv end'+
+'  else _ec=_ec+1 '+G.ev+'[_ec]='+G.evalExpr+'(_vn,'+G.env+') end'+
+' end'+
+' for '+G.j+','+G.nm+' in ipairs('+G.s+'[2]) do '+G.env+'._v['+G.nm+']='+G.ev+'['+G.j+'] '+G.env+'._d['+G.nm+']=true end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['assign'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.ev+'={} local _ec=0'+
+' for '+G.j+',_vn in ipairs('+G.s+'[3]) do'+
+'  if '+G.j+'==#'+G.s+'[3] then'+
+'   local _lv='+G.evalExpr+'(_vn,'+G.env+')'+
+'   if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then'+
+'    for _,_x in ipairs(_lv) do _ec=_ec+1 '+G.ev+'[_ec]=_x end'+
+'   else _ec=_ec+1 '+G.ev+'[_ec]=_lv end'+
+'  else _ec=_ec+1 '+G.ev+'[_ec]='+G.evalExpr+'(_vn,'+G.env+') end'+
+' end'+
+' for '+G.j+','+G.tg+' in ipairs('+G.s+'[2]) do'+
+'  local '+G.tnk+'='+G.NKDEC+'[bit32.bxor('+G.tg+'[1],'+AOXR+')]'+
+'  if '+G.tnk+'=='+NK['name']+' then '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.ev+'['+G.j+'])'+
+'  elseif '+G.tnk+'=='+NK['field']+' then'+
+'   local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')'+
+'   '+G.to+'['+G.tg+'[3]]='+G.ev+'['+G.j+']'+
+'  elseif '+G.tnk+'=='+NK['index']+' then'+
+'   local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')'+
+'   local '+G.tk2+'='+G.evalExpr+'('+G.tg+'[3],'+G.env+')'+
+'   '+G.to+'['+G.tk2+']='+G.ev+'['+G.j+']'+
+'  end'+
+' end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['do'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.de+'='+G.makeEnv+'('+G.env+',nil)'+
+' local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[2],'+G.de+')'+
+' if '+G._sig+'~='+G.CF0+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['while'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local _gsi=false'+
+' while true do'+
+'  local _cwh='+G.evalExpr+'('+G.s+'[2],'+G.env+')'+
+'  if type(_cwh)=="table" and getmetatable(_cwh)=='+G.MRET+' then _cwh=_cwh[1] end'+
+'  if not _cwh then break end'+
+'  local '+G.we+'='+G.makeEnv+'('+G.env+',nil)'+
+'  local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[3],'+G.we+')'+
+'  if '+G._sig+'=='+G.CF1+' then break end'+
+'  if '+G._sig+'=='+G.CF2+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+'  if '+G._sig+'=='+G.CF3+' then'+
+'   if '+G.labels+'['+G._vals+'] then _gsi='+G.labels+'['+G._vals+']+1 break'+
+'   else return '+G._sig+','+G._vals+','+G.si+' end'+
+'  end'+
+' end'+
+' if _gsi then return nil,nil,_gsi end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['repeat'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' repeat'+
+'  local '+G.re+'='+G.makeEnv+'('+G.env+',nil)'+
+'  local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[2],'+G.re+')'+
+'  if '+G._sig+'=='+G.CF1+' then break end'+
+'  if '+G._sig+'=='+G.CF2+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+'  local _crp='+G.evalExpr+'('+G.s+'[3],'+G.re+')'+
+'  if type(_crp)=="table" and getmetatable(_crp)=='+G.MRET+' then _crp=_crp[1] end'+
+'  if _crp then break end'+
+' until false'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['if'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.taken+'=false'+
+' local _cif='+G.evalExpr+'('+G.s+'[2],'+G.env+')'+
+' if type(_cif)=="table" and getmetatable(_cif)=='+G.MRET+' then _cif=_cif[1] end'+
+' if _cif then'+
+'  '+G.taken+'=true'+
+'  local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)'+
+'  local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[3],'+G.ie+')'+
+'  if '+G._sig+'~='+G.CF0+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+' else'+
+'  for _,'+G.ei+' in ipairs('+G.s+'[4]) do'+
+'   local _cif='+G.evalExpr+'('+G.ei+'[1],'+G.env+')'+
+'   if type(_cif)=="table" and getmetatable(_cif)=='+G.MRET+' then _cif=_cif[1] end'+
+'   if _cif then'+
+'    '+G.taken+'=true'+
+'    local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)'+
+'    local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.ei+'[2],'+G.ie+')'+
+'    if '+G._sig+'~='+G.CF0+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+'    break'+
+'   end'+
+'  end'+
+' end'+
+' if not '+G.taken+' and '+G.s+'[5] then'+
+'  local '+G.ie+'='+G.makeEnv+'('+G.env+',nil)'+
+'  local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[5],'+G.ie+')'+
+'  if '+G._sig+'~='+G.CF0+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+' end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['numfor'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.nm+'='+G.s+'[2]'+
+' local '+G.fi+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')'+
+' local '+G.lm+'='+G.evalExpr+'('+G.s+'[4],'+G.env+')'+
+' local '+G.sp+'='+G.s+'[5] and '+G.evalExpr+'('+G.s+'[5],'+G.env+') or 1'+
+' while ('+G.sp+'>0 and '+G.fi+'<='+G.lm+') or ('+G.sp+'<0 and '+G.fi+'>='+G.lm+') do'+
+'  local '+G.ge+'='+G.makeEnv+'('+G.env+',nil)'+
+'  '+G.ge+'._v['+G.nm+']='+G.fi+' '+G.ge+'._d['+G.nm+']=true'+
+'  local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[6],'+G.ge+')'+
+'  if '+G._sig+'=='+G.CF1+' then break end'+
+'  if '+G._sig+'=='+G.CF2+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+'  '+G.fi+'='+G.fi+'+'+G.sp+
+' end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['genfor'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.ev+'={}'+
+' for '+G.j+',_it in ipairs('+G.s+'[3]) do'+
+'  if '+G.j+'==#'+G.s+'[3] then'+
+'   local _lv='+G.evalExpr+'(_it,'+G.env+')'+
+'   if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then'+
+'    for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end'+
+'   else '+G.ev+'[#'+G.ev+'+1]=_lv end'+
+'  else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_it,'+G.env+') end'+
+' end'+
+' local '+G.iterF+'='+G.ev+'[1] local '+G.iterS+'='+G.ev+'[2] local '+G.iterV+'='+G.ev+'[3]'+
+' while true do'+
+'  local '+G.res+'=table.pack('+G.iterF+'('+G.iterS+','+G.iterV+'))'+
+'  if '+G.res+'[1]==nil then break end'+
+'  '+G.iterV+'='+G.res+'[1]'+
+'  local '+G.ge+'='+G.makeEnv+'('+G.env+',nil)'+
+'  for '+G.j+','+G.nm+' in ipairs('+G.s+'[2]) do '+G.ge+'._v['+G.nm+']='+G.res+'['+G.j+'] '+G.ge+'._d['+G.nm+']=true end'+
+'  local '+G._sig+','+G._vals+'='+G.evalBlock+'('+G.s+'[4],'+G.ge+')'+
+'  if '+G._sig+'=='+G.CF1+' then break end'+
+'  if '+G._sig+'=='+G.CF2+' then return '+G._sig+','+G._vals+','+G.si+' end'+
+' end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['return'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.ev+'={}'+
+' for '+G.j+',_rv in ipairs('+G.s+'[2]) do'+
+'  if '+G.j+'==#'+G.s+'[2] then'+
+'   local _lv='+G.evalExpr+'(_rv,'+G.env+')'+
+'   if type(_lv)=="table" and getmetatable(_lv)=='+G.MRET+' then'+
+'    for _,_x in ipairs(_lv) do '+G.ev+'[#'+G.ev+'+1]=_x end'+
+'   else '+G.ev+'[#'+G.ev+'+1]=_lv end'+
+'  else '+G.ev+'[#'+G.ev+'+1]='+G.evalExpr+'(_rv,'+G.env+') end'+
+' end'+
+' return '+G.CF2+','+G.ev+','+G.si+' end'});
+  handlers.push({key:NK['break'], code:
+'function('+G.s+','+G.env+','+G.si+') return '+G.CF1+',nil,'+G.si+' end'});
+  handlers.push({key:NK['continue'], code:
+'function('+G.s+','+G.env+','+G.si+') return '+G.CF4+',nil,'+G.si+' end'});
+  handlers.push({key:NK['funcdef'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')'+
+' local '+G.fn+'='+G.evalExpr+'('+G.s+'[3],'+G.env+')'+
+' local '+G.tg+'='+G.s+'[2]'+
+' local '+G.tnk+'='+G.NKDEC+'[bit32.bxor('+G.tg+'[1],'+AOXR+')]'+
+' if '+G.tnk+'=='+NK['name']+' then '+G.setVar+'('+G.env+','+G.tg+'[2],'+G.fn+')'+
+' elseif '+G.tnk+'=='+NK['field']+' then'+
+'  local '+G.to+'='+G.evalExpr+'('+G.tg+'[2],'+G.env+')'+
+'  '+G.to+'['+G.tg+'[3]]='+G.fn+
+' end'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['localfunc'], code:
+'function('+G.s+','+G.env+','+G.si+')'+
+' '+G.env+'._d['+G.s+'[2]]=true '+G.env+'._v['+G.s+'[2]]=nil'+
+' '+G.env+'._v['+G.s+'[2]]='+G.evalExpr+'('+G.s+'[3],'+G.env+')'+
+' return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['label'], code:
+'function('+G.s+','+G.env+','+G.si+') return nil,nil,'+G.si+'+1 end'});
+  handlers.push({key:NK['goto'], code:
+'function('+G.s+','+G.env+','+G.si+','+G.labels+')'+
+' if '+G.labels+'['+G.s+'[2]] then return nil,nil,'+G.labels+'['+G.s+'[2]]+1 end'+
+' return '+G.CF3+','+G.s+'[2],'+G.si+' end'});
+  handlers.push({key:NK['dead'], code:
+'function('+G.s+','+G.env+','+G.si+') return nil,nil,'+G.si+'+1 end'});
+  // Add dead opcode entries
+  for(let di=0;di<DEAD.length && di<4;di++){
+    handlers.push({key:DEAD[di], code:
+'function('+G.s+','+G.env+','+G.si+') if '+genOpaqueAlwaysFalse()+' then return '+G.CF1+',nil,'+G.si+' end return nil,nil,'+G.si+'+1 end'});
+  }
+  // Shuffle handler registration order
+  for(let i=handlers.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    const tmp=handlers[i]; handlers[i]=handlers[j]; handlers[j]=tmp;
+  }
+  const lines=[];
+  lines.push('local '+G.BD+'={}');
+  for(const h of handlers){
+    lines.push(G.BD+'['+h.key+']='+h.code);
+  }
+  lines.push(G.evalBlock+'=function('+G.n+','+G.env+')');
+  lines.push('  local '+G.stmts+'='+G.n+'[2]');
+  lines.push('  local '+G.labels+'={}');
+  lines.push('  for _,'+G.s+' in ipairs('+G.stmts+') do');
+  lines.push('    if '+G.NKDEC+'[bit32.bxor('+G.s+'[1],'+AOXR+')]=='+NK['label']+' then '+G.labels+'['+G.s+'[2]]=_ end');
+  lines.push('  end');
+  lines.push('  local '+G.si+'=1');
+  lines.push('  while '+G.si+'<=#'+G.stmts+' do');
+  lines.push('    local '+G.s+'='+G.stmts+'['+G.si+']');
+  lines.push('    local '+G.sk+'='+G.NKDEC+'[bit32.bxor('+G.s+'[1],'+AOXR+')]');
+  lines.push('    local _h='+G.BD+'['+G.sk+']');
+  lines.push('    if _h then');
+  lines.push('      local '+G._sig+','+G._vals+','+G._nsi+'=_h('+G.s+','+G.env+','+G.si+','+G.labels+','+G.stmts+')');
+  lines.push('      if '+G._sig+' then return '+G._sig+','+G._vals+' end');
+  lines.push('      '+G.si+'='+G._nsi);
+  lines.push('    else '+G.si+'='+G.si+'+1 end');
+  lines.push('  end');
+  lines.push('  return '+G.CF0+',nil');
+  lines.push('end');
+  return lines;
+})(),
 '',
 'local '+G.AST+'='+safeAstStr,
 'local '+G.genv+'={_p=nil,_up=nil,_v={},_d={}}',
