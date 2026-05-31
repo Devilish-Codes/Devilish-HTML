@@ -512,9 +512,10 @@ var BC={
   FORLOOP:32,FORPREP:33,TFORCALL:34,TFORLOOP:35,
   SETLIST:36,CLOSURE:37,VARARG:38,
   BAND:39,BOR:40,BXOR:41,SHL:42,SHR:43,BNOT:44,
-  NOP:45,CLOSE:46
+  NOP:45,CLOSE:46,
+  SUPER_MRET:47,SUPER_KRET:48,SUPER_GCALL:49
 };
-var BC_COUNT=47;
+var BC_COUNT=50;
 var GARBAGE_OP=255;
 
 function bcEncode(op,a,b,c){return(op&0xFF)|((a&0xFF)<<8)|((b&0xFF)<<16)|((c&0xFF)<<24);}
@@ -1290,6 +1291,106 @@ function bcCompileTopLevel(ast){
 }
 
 // ─── GARBAGE BYTECODE INJECTION ──────────────────────────────────────────────
+// ─── SUPEROPERATOR FUSION ────────────────────────────────────────────────────
+function fuseInstructions(proto){
+  for(var i=0;i<proto.p.length;i++) fuseInstructions(proto.p[i]);
+  var code=proto.code;
+  var len=code.length;
+  if(len<2) return;
+  // Build protected set: skip-next positions + jump targets
+  var protectedFuse=new Set();
+  var jumpOps=[BC.JMP,BC.FORLOOP,BC.FORPREP,BC.TFORLOOP];
+  for(var pc=0;pc<len;pc++){
+    var inst=code[pc];
+    var op=inst&0xFF;
+    if(op===BC.EQ||op===BC.LT||op===BC.LE||op===BC.TEST||op===BC.TESTSET){
+      protectedFuse.add(pc);protectedFuse.add(pc+1);
+    }
+    if(op===BC.LOADBOOL&&((inst>>24)&0xFF)!==0){
+      protectedFuse.add(pc);protectedFuse.add(pc+1);
+    }
+    // Mark jump targets as protected so we never fuse away a target
+    for(var ji=0;ji<jumpOps.length;ji++){
+      if(op===jumpOps[ji]){
+        var sbx=((inst>>16)&0xFFFF)-32767;
+        var target=pc+1+sbx;
+        if(target>=0&&target<=len) protectedFuse.add(target);
+        break;
+      }
+    }
+  }
+  // First pass: determine which pairs can be fused
+  var fuseAt=new Set();
+  var pc=0;
+  while(pc<len){
+    if(protectedFuse.has(pc)){pc++;continue;}
+    if(pc+1<len&&!protectedFuse.has(pc+1)){
+      var inst=code[pc],inst2=code[pc+1];
+      var op=inst&0xFF,op2=inst2&0xFF;
+      var a=(inst>>8)&0xFF,a2=(inst2>>8)&0xFF;
+      if(op===BC.MOVE&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
+      if(op===BC.LOADK&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
+      if(op===BC.GETGLOBAL&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
+    }
+    pc++;
+  }
+  if(fuseAt.size===0) return;
+  // Build old→new PC mapping
+  var oldToNew=new Array(len+1);
+  var newPc=0;
+  pc=0;
+  while(pc<len){
+    oldToNew[pc]=newPc;
+    if(fuseAt.has(pc)){
+      var op=(code[pc]&0xFF);
+      if(op===BC.GETGLOBAL) newPc+=2; else newPc+=1;
+      oldToNew[pc+1]=newPc; // second instruction maps to after the fused output
+      pc+=2;
+    }else{
+      newPc++;pc++;
+    }
+  }
+  oldToNew[len]=newPc;
+  // Build new code with fused instructions
+  var newCode=[];
+  pc=0;
+  while(pc<len){
+    if(fuseAt.has(pc)){
+      var inst=code[pc],inst2=code[pc+1];
+      var op=inst&0xFF;
+      var a=(inst>>8)&0xFF;
+      if(op===BC.MOVE){
+        newCode.push(bcEncode(BC.SUPER_MRET,a,(inst>>16)&0xFF,0));
+      }else if(op===BC.LOADK){
+        var bx=(inst>>16)&0xFFFF;
+        newCode.push(bcEncode(BC.SUPER_KRET,a,bx&0xFF,(bx>>8)&0xFF));
+      }else{ // GETGLOBAL+CALL
+        var bx2=(inst>>16)&0xFFFF;
+        newCode.push(bcEncode(BC.SUPER_GCALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
+        newCode.push(bcEncode(0,0,bx2&0xFF,(bx2>>8)&0xFF));
+      }
+      pc+=2;
+    }else{
+      var inst=code[pc];
+      var op=inst&0xFF;
+      // Fix jump targets
+      for(var ji=0;ji<jumpOps.length;ji++){
+        if(op===jumpOps[ji]){
+          var a=(inst>>8)&0xFF;
+          var sbx=((inst>>16)&0xFFFF)-32767;
+          var oldTarget=pc+1+sbx;
+          var newSbx=oldToNew[oldTarget]-(oldToNew[pc]+1);
+          newCode.push(bcEncodesBx(op,a,newSbx));
+          op=-1; break;
+        }
+      }
+      if(op!==-1) newCode.push(inst);
+      pc++;
+    }
+  }
+  proto.code=newCode;
+}
+
 function injectGarbage(proto){
   for(var i=0;i<proto.p.length;i++) injectGarbage(proto.p[i]);
   var codeLen=proto.code.length;
@@ -1303,6 +1404,9 @@ function injectGarbage(proto){
       protectedPos.add(pc+1);
     }
     if(op===BC.LOADBOOL&&((inst>>24)&0xFF)!==0){
+      protectedPos.add(pc+1);
+    }
+    if(op===BC.SUPER_GCALL){
       protectedPos.add(pc+1);
     }
   }
@@ -1533,7 +1637,7 @@ function encryptProtoString(plainStr,protoIdx,FENC_KEY,FENC_MUL,FENC_ADD){
 }
 
 // ─── BYTECODE VM GENERATOR ──────────────────────────────────────────────────
-function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr,imutSeedExpr,imutMulExpr){
+function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr,imutSeedExpr,imutMulExpr,BUILD_ID,watermarkIdx,MBA_TEMPLATE,encNum){
   // Reuse name generator and encryption from tree-walking mode
   var _usedNames=new Set();
   function rn(){
@@ -1550,6 +1654,22 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
       var st=arr[si];arr[si]=arr[sj];arr[sj]=st;
     }
     return arr;
+  }
+  // Expression polymorphism — randomly select equivalent math expressions
+  function polyMod256(expr){
+    return Math.random()<0.5?expr+'%256':'bit32.band('+expr+',255)';
+  }
+  function polyMod16M(expr){
+    return Math.random()<0.5?expr+'%16777216':'bit32.band('+expr+',16777215)';
+  }
+  function polyDiv256(expr){
+    return Math.random()<0.5?'math.floor('+expr+'/256)':'bit32.rshift('+expr+',8)';
+  }
+  function polyDiv65536(expr){
+    return Math.random()<0.5?'math.floor('+expr+'/65536)':'bit32.rshift('+expr+',16)';
+  }
+  function polyMul262144(expr){
+    return Math.random()<0.5?expr+'*262144':'bit32.lshift('+expr+',18)';
   }
   var R={};
   ['S','ES','EKA','EKB','NKDEC','accLen','sHash','nextSI',
@@ -1668,7 +1788,11 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
       function(){var N=Math.floor(Math.random()*9998)+2;return'('+N+'*'+N+')%4~=3';},
       function(){var N=Math.floor(Math.random()*9998)+2;return N+'%1==0';},
       function(){var N=Math.floor(Math.random()*9998)+2;return'('+N+'*'+N+'+'+N+')%2==0';},
-      function(){var N=Math.floor(Math.random()*0xFFFF)+1;return'bit32.bor('+N+',0)=='+N;}
+      function(){var N=Math.floor(Math.random()*0xFFFF)+1;return'bit32.bor('+N+',0)=='+N;},
+      function(){var N=Math.floor(Math.random()*0xFFFF)+1;return'type('+N+')=="number"';},
+      function(){var N=Math.floor(Math.random()*0xFFFF)+1;return'select(1,'+N+')=='+N;},
+      function(){var N=Math.floor(Math.random()*9998)+2;return'math.floor('+N+')=='+N;},
+      function(){var N=Math.floor(Math.random()*0x7FFF)+1;var K=Math.floor(Math.random()*7)+1;return'bit32.rshift(bit32.lshift('+N+','+K+'),'+K+')=='+N;}
     ];
     return tpls[Math.floor(Math.random()*tpls.length)]();
   }
@@ -1677,7 +1801,11 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
       function(){var N=Math.floor(Math.random()*0xEEEE)+0x1111;return'bit32.band('+N+',255)=='+(((N&0xFF)+1)&0xFF);},
       function(){var N=Math.floor(Math.random()*9998)+2;return'('+N+'*'+N+')%4==3';},
       function(){var N=Math.floor(Math.random()*9998)+2;return'('+N+'*'+N+'+'+N+')%2==1';},
-      function(){var N=Math.floor(Math.random()*9998)+2;return N+'%1~=0';}
+      function(){var N=Math.floor(Math.random()*9998)+2;return N+'%1~=0';},
+      function(){var N=Math.floor(Math.random()*0xFFFF)+1;return'type('+N+')=="string"';},
+      function(){return'string.len("")~=0';},
+      function(){var N=Math.floor(Math.random()*0xFFFF)+1;return'bit32.rshift('+N+',32)=='+N;},
+      function(){var N=Math.floor(Math.random()*9998)+2;return'math.floor('+N+'+0.5)=='+N+'+1';}
     ];
     return tpls[Math.floor(Math.random()*tpls.length)]();
   }
@@ -1693,18 +1821,26 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   function fieldExpr(varName,fieldIdx){
     // fieldIdx: 0=op, 1=a, 2=b, 3=c
     var bytePos=FIELD_ORDER[fieldIdx]; // which byte position holds this field
-    if(bytePos===0)return varName+'%256';
-    return'math.floor('+varName+'/'+shifts[bytePos]+')%256';
+    if(bytePos===0)return polyMod256(varName);
+    if(bytePos===1)return polyMod256(polyDiv256(varName));
+    if(bytePos===2)return polyMod256(polyDiv65536(varName));
+    return polyMod256('math.floor('+varName+'/16777216)');
   }
   function bxExpr(varName){
     // Bx = bytes at positions for B and C combined as 16-bit
     // B is at FIELD_ORDER[2], C is at FIELD_ORDER[3]
     var bPos=FIELD_ORDER[2],cPos=FIELD_ORDER[3];
     if(cPos===bPos+1){
-      return'math.floor('+varName+'/'+shifts[bPos]+')%65536';
+      var inner;
+      if(bPos===0)inner=varName;
+      else if(bPos===1)inner=polyDiv256(varName);
+      else inner='math.floor('+varName+'/'+shifts[bPos]+')';
+      return inner+'%65536';
     }else{
       // B and C not adjacent or in wrong order — compute separately and combine
-      return'(math.floor('+varName+'/'+shifts[bPos]+')%256+math.floor('+varName+'/'+shifts[cPos]+')%256*256)';
+      var bE=polyMod256('math.floor('+varName+'/'+shifts[bPos]+')');
+      var cE=polyMod256('math.floor('+varName+'/'+shifts[cPos]+')');
+      return'('+bE+'+'+cE+'*256)';
     }
   }
 
@@ -1723,38 +1859,83 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
 
   var lines=[];
 
-  // Setup
+  // Setup — _GENV must come first, then 3 independent blocks in random order
   lines.push('local _GENV=getgenv and getgenv() or _G');
-  // Layer 32: __tostring hijacking — poison string/number metatables
-  lines.push('pcall(function() local _mt=getmetatable("") if _mt then _mt.__tostring=nil end end)');
-  lines.push('pcall(function() local _mt=getmetatable(0) if _mt then _mt.__tostring=nil end end)');
+  // Build 3 independent init blocks, then shuffle their order
+  var _envRef=rn();
+  var _cachedFn=rn();
+  var initBlocks=[
+    // Block A: __tostring hijacking
+    ['pcall(function() local _mt=getmetatable("") if _mt then _mt.__tostring=nil end end)',
+     'pcall(function() local _mt=getmetatable(0) if _mt then _mt.__tostring=nil end end)'],
+    // Block B: getfenv/setfenv override
+    ['local '+_envRef+'=_GENV',
+     'pcall(function() _GENV.getfenv=function() return '+_envRef+' end end)',
+     'pcall(function() _GENV.setfenv=function() end end)'],
+    // Block C: rawequal cache
+    ['local '+_cachedFn+'=rawequal']
+  ];
+  shuffle(initBlocks);
+  for(var ib=0;ib<initBlocks.length;ib++){
+    for(var ibl=0;ibl<initBlocks[ib].length;ibl++){
+      lines.push(initBlocks[ib][ibl]);
+    }
+  }
+  // Phase 2.1: Roblox environment gate — XOR EKA byte with env-derived key
+  var ENV_MULT=Math.floor(Math.random()*60)+5;
+  var ENV_IDX=Math.floor(Math.random()*KEY_LEN); // which EKA byte to XOR
+  var ENV_EXPECTED=3; // game(1)+workspace(2)=3 in real Roblox
+  var envK=(ENV_EXPECTED*ENV_MULT)&0xFF;
+  keyA[ENV_IDX]^=envK; // pre-XOR so runtime must undo it
   lines.push('local '+R.EKA+'={'+keyA.join(',')+'}');
   lines.push('local '+R.EKB+'={'+keyB.join(',')+'}');
   lines.push('local '+R.ES+'={'+encStrs.join(',')+'}');
+  // Runtime environment check — derives _envBit from Roblox globals
+  var _envBit=rn(),_envK=rn();
+  lines.push('local '+_envBit+'=0');
+  lines.push('pcall(function() if type(game)=="userdata" then '+_envBit+'='+_envBit+'+1 end end)');
+  lines.push('pcall(function() if type(workspace)=="userdata" then '+_envBit+'='+_envBit+'+2 end end)');
+  lines.push('local '+_envK+'=bit32.band('+_envBit+'*'+ENV_MULT+',255)');
+  lines.push(R.EKA+'['+(ENV_IDX+1)+']=bit32.bxor('+R.EKA+'['+(ENV_IDX+1)+'],'+_envK+')');
   lines.push('local '+R.accLen+'=0');
   lines.push('local '+R.sHash+'='+HSEED);
   lines.push('local '+R.nextSI+'=1');
 
-  // String decryption (same lazy metatable as tree-walking)
-  lines.push('local '+R.S+'=setmetatable({},{__index=function('+R.dI+','+R.dJ+')');
-  lines.push('  while '+R.nextSI+'<='+R.dJ+' do');
-  lines.push('    local '+R.dR+'={}');
-  lines.push('    for '+R.ki+'=1,#'+R.ES+'['+R.nextSI+'] do');
-  lines.push('      local _ki=('+R.nextSI+'+'+R.ki+'-1+'+R.accLen+')%'+KEY_LEN+'+1');
-  lines.push('      local _inc=((_ki-1)*'+SMUL+'+'+SADD+')%256');
-  lines.push('      local _sa=('+R.EKB+'[_ki]-_inc+256)%256');
-  lines.push('      local _pb=bit32.bxor(string.byte('+R.ES+'['+R.nextSI+'],'+R.ki+'),bit32.bxor('+R.EKA+'[_ki],_sa),'+R.sHash+'%256)');
-  lines.push('      '+R.dR+'['+R.ki+']=string.char(_pb)');
-  lines.push('    end');
-  lines.push('    for '+R.ki+'=1,#'+R.dR+' do');
-  lines.push('      '+R.sHash+'=('+R.sHash+'*'+HMUL+'+string.byte('+R.dR+'['+R.ki+'],1)+'+HADD+')%'+HMOD);
-  lines.push('    end');
-  lines.push('    '+R.accLen+'=('+R.accLen+'+#'+R.dR+')%'+KEY_LEN);
-  lines.push('    rawset('+R.dI+','+R.nextSI+',table.concat('+R.dR+'))');
-  lines.push('    '+R.nextSI+'='+R.nextSI+'+1');
-  lines.push('  end');
-  lines.push('  return rawget('+R.dI+','+R.dJ+')');
-  lines.push('end})');
+  // String decryption — randomly pick lazy metatable (A) or eager decode (B)
+  var STR_DECRYPT_VARIANT=Math.floor(Math.random()*2);
+  // Helper: emit the inner decryption loop body for one string
+  function emitStrDecryptLoop(idxExpr,indent){
+    lines.push(indent+'local '+R.dR+'={}');
+    lines.push(indent+'for '+R.ki+'=1,#'+R.ES+'['+idxExpr+'] do');
+    lines.push(indent+'  local _ki=('+idxExpr+'+'+R.ki+'-1+'+R.accLen+')%'+KEY_LEN+'+1');
+    lines.push(indent+'  local _inc='+polyMod256('((_ki-1)*'+SMUL+'+'+SADD+')'));
+    lines.push(indent+'  local _sa='+polyMod256('('+R.EKB+'[_ki]-_inc+256)'));
+    lines.push(indent+'  local _pb=bit32.bxor(string.byte('+R.ES+'['+idxExpr+'],'+R.ki+'),bit32.bxor('+R.EKA+'[_ki],_sa),'+polyMod256(R.sHash)+')');
+    lines.push(indent+'  '+R.dR+'['+R.ki+']=string.char(_pb)');
+    lines.push(indent+'end');
+    lines.push(indent+'for '+R.ki+'=1,#'+R.dR+' do');
+    lines.push(indent+'  '+R.sHash+'='+polyMod16M('('+R.sHash+'*'+HMUL+'+string.byte('+R.dR+'['+R.ki+'],1)+'+HADD+')'));
+    lines.push(indent+'end');
+    lines.push(indent+R.accLen+'=('+R.accLen+'+#'+R.dR+')%'+KEY_LEN);
+  }
+  if(STR_DECRYPT_VARIANT===0){
+    // Variant A: Lazy metatable — decrypts on-demand via __index
+    lines.push('local '+R.S+'=setmetatable({},{__index=function('+R.dI+','+R.dJ+')');
+    lines.push('  while '+R.nextSI+'<='+R.dJ+' do');
+    emitStrDecryptLoop(R.nextSI,'    ');
+    lines.push('    rawset('+R.dI+','+R.nextSI+',table.concat('+R.dR+'))');
+    lines.push('    '+R.nextSI+'='+R.nextSI+'+1');
+    lines.push('  end');
+    lines.push('  return rawget('+R.dI+','+R.dJ+')');
+    lines.push('end})');
+  }else{
+    // Variant B: Eager decode — all strings decrypted at init (no metatable fingerprint)
+    lines.push('local '+R.S+'={}');
+    lines.push('for '+R.nextSI+'=1,#'+R.ES+' do');
+    emitStrDecryptLoop(R.nextSI,'  ');
+    lines.push('  '+R.S+'['+R.nextSI+']=table.concat('+R.dR+')');
+    lines.push('end');
+  }
 
   // OPDEC table — Layer 33: metatable dispatch (hidden table + __index wrapper)
   var _hiddenName=rn();
@@ -1775,33 +1956,74 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+R.EAST+'='+encAstLiteral);
   lines.push('do local '+R.tCk+'='+TSEED);
   lines.push('for '+R.tI+'=1,#'+R.ES+' do for '+R.tJ+'=1,#'+R.ES+'['+R.tI+'] do');
-  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+string.byte('+R.ES+'['+R.tI+'],'+R.tJ+')+1)%'+TMOD);
+  lines.push('  '+R.tCk+'='+polyMod16M('('+R.tCk+'*'+TMUL+'+string.byte('+R.ES+'['+R.tI+'],'+R.tJ+')+1)'));
   lines.push('end end');
   lines.push('for '+R.tI+'=1,#'+R.EAST+' do');
-  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+string.byte('+R.EAST+','+R.tI+')+1)%'+TMOD);
+  lines.push('  '+R.tCk+'='+polyMod16M('('+R.tCk+'*'+TMUL+'+string.byte('+R.EAST+','+R.tI+')+1)'));
   lines.push('end');
   lines.push('for '+R.tI+'=1,#'+R.EKA+' do');
-  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+R.EKA+'['+R.tI+']+1)%'+TMOD);
+  lines.push('  '+R.tCk+'='+polyMod16M('('+R.tCk+'*'+TMUL+'+'+R.EKA+'['+R.tI+']+1)'));
   lines.push('end');
   lines.push('for '+R.tI+'=1,#'+R.EKB+' do');
-  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+R.EKB+'['+R.tI+']+1)%'+TMOD);
+  lines.push('  '+R.tCk+'='+polyMod16M('('+R.tCk+'*'+TMUL+'+'+R.EKB+'['+R.tI+']+1)'));
   lines.push('end');
   lines.push('do local _ks={} for '+R.tI+' in pairs('+_hiddenName+') do _ks[#_ks+1]='+R.tI+' end table.sort(_ks)');
   lines.push('for _,'+R.tI+' in ipairs(_ks) do');
-  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+R.tI+'+1)%'+TMOD);
-  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+_hiddenName+'['+R.tI+']+1)%'+TMOD);
+  lines.push('  '+R.tCk+'='+polyMod16M('('+R.tCk+'*'+TMUL+'+'+R.tI+'+1)'));
+  lines.push('  '+R.tCk+'='+polyMod16M('('+R.tCk+'*'+TMUL+'+'+_hiddenName+'['+R.tI+']+1)'));
   lines.push('end end');
   lines.push('if '+R.tCk+'~='+_tChk+' then');
   lines.push('  for '+R.tI+'=1,#'+R.EKA+' do '+R.EKA+'['+R.tI+']=bit32.bxor('+R.EKA+'['+R.tI+'],171) end');
   lines.push('end end');
 
+  // Phase 2.3: Decoy loadstring traps — look like real AST decrypt but carry garbage
+  var DECOY_COUNT=Math.floor(Math.random()*2)+2; // 2-3 decoys
+  for(var dc=0;dc<DECOY_COUNT;dc++){
+    var fakeStr='return function() end';
+    var fakeSeed=Math.floor(Math.random()*16777215)+1;
+    var fakeMult=(Math.floor(Math.random()*126)+1)*2+1;
+    var fakeAdd=Math.floor(Math.random()*254)+1;
+    var fakeMod=16777216;
+    var fdk=fakeSeed;
+    var fakeBytes=[];
+    for(var fi=0;fi<fakeStr.length;fi++){
+      var fb2=fakeStr.charCodeAt(fi)&0xFF;
+      fakeBytes.push(fb2^(fdk&0xFF));
+      fdk=(fdk*fakeMult+fb2+fakeAdd)%fakeMod;
+    }
+    var fakeLit=luaByteLiteral(fakeBytes);
+    var _fdk=rn(),_fdp=rn(),_feast=rn();
+    lines.push('do');
+    lines.push('  local '+_fdk+'='+fakeSeed);
+    lines.push('  local '+_fdp+'={}');
+    lines.push('  local '+_feast+'='+fakeLit);
+    lines.push('  for _i=1,#'+_feast+' do');
+    lines.push('    local _b=bit32.bxor(string.byte('+_feast+',_i),'+polyMod256(_fdk)+')');
+    lines.push('    '+_fdp+'[_i]=string.char(_b)');
+    lines.push('    '+_fdk+'='+polyMod16M('('+_fdk+'*'+fakeMult+'+_b+'+fakeAdd+')'));
+    lines.push('  end');
+    lines.push('  pcall(load or loadstring,table.concat('+_fdp+'))');
+    lines.push('end');
+  }
+
+  // Phase 2.2: loadstring canary — verify load/loadstring returns a callable
+  var canaryA=Math.floor(Math.random()*9000)+1000;
+  var canaryB=Math.floor(Math.random()*9000)+1000;
+  var _ckFn=rn();
+  lines.push('do');
+  lines.push('  local '+_ckFn+'=(load or loadstring)("return '+canaryA+'+'+canaryB+'")');
+  lines.push('  if type('+_ckFn+')~="function" or '+_ckFn+'()~='+(canaryA+canaryB)+' then');
+  lines.push('    for _i=1,#'+R.EKA+' do '+R.EKA+'[_i]=bit32.bxor('+R.EKA+'[_i],170) end');
+  lines.push('  end');
+  lines.push('end');
+
   // Decrypt prototype blob
   lines.push('local '+R.dkAST+'='+AST_SEED);
   lines.push('local '+R.dpAST+'={}');
   lines.push('for _i=1,#'+R.EAST+' do');
-  lines.push('  local _b=bit32.bxor(string.byte('+R.EAST+',_i),'+R.dkAST+'%256)');
+  lines.push('  local _b=bit32.bxor(string.byte('+R.EAST+',_i),'+polyMod256(R.dkAST)+')');
   lines.push('  '+R.dpAST+'[_i]=string.char(_b)');
-  lines.push('  '+R.dkAST+'=('+R.dkAST+'*'+AST_MULT+'+_b+'+AST_ADD+')%'+AST_MOD);
+  lines.push('  '+R.dkAST+'='+polyMod16M('('+R.dkAST+'*'+AST_MULT+'+_b+'+AST_ADD+')'));
   lines.push('end');
   lines.push('local '+R.PROTO+'=(load or loadstring)(table.concat('+R.dpAST+'))()('+R.S+')');
   lines.push(R.EAST+'=nil '+R.dpAST+'=nil '+R.dkAST+'=nil');
@@ -1836,11 +2058,25 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('    if _e[1]==1 then rawset(_t,_i,_e[2]) return _e[2]');
   lines.push('    elseif _e[1]==0 then return nil');
   lines.push('    elseif _e[1]==2 then');
-  lines.push('      local _v=bit32.bxor(_e[2],bit32.band(_kk*_e[3]+_km,16777215))');
+  lines.push('      local _mk='+polyMod16M('(_kk*_e[3]+_km)'));
+  var mbaExpr;
+  if(MBA_TEMPLATE===0){
+    mbaExpr='bit32.bor(_e[2],_mk)-bit32.band(_e[2],_mk)';
+  }else if(MBA_TEMPLATE===1){
+    mbaExpr='bit32.band(bit32.bor(bit32.band(_e[2],bit32.bnot(_mk)),bit32.band(bit32.bnot(_e[2]),_mk)),16777215)';
+  }else{
+    mbaExpr='bit32.band((_e[2]+_mk)-2*bit32.band(_e[2],_mk),16777215)';
+  }
+  lines.push('      local _v='+mbaExpr);
   lines.push('      rawset(_t,_i,_v) return _v');
   lines.push('    end');
   lines.push('  end})');
   lines.push('end');
+
+  // Layer 37: Obfuscated magic numbers
+  var _rk128=rn(),_sbx32767=rn();
+  lines.push('local '+_rk128+'='+encNum(128));
+  lines.push('local '+_sbx32767+'='+encNum(32767));
 
   // Register read helper (unwraps upvalue cells)
   var _rget=rn(),_rset=rn();
@@ -1856,7 +2092,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('end');
   // RK helper (cell-aware)
   lines.push('local function '+R.RK+'(_R,_K,_v)');
-  lines.push('  if _v>=128 then return _K[_v-127] end');
+  lines.push('  if _v>='+_rk128+' then return _K[_v-'+_rk128+'+1] end');
   lines.push('  local _r=_R[_v]');
   lines.push('  if type(_r)=="table" and _r.__uv then return _r.val end');
   lines.push('  return _r');
@@ -1878,26 +2114,42 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  if '+R.PROTO+'[6] then');
   lines.push('    local _va2={} for _i='+R.PROTO+'[5]+1,#_VA do _va2[#_va2+1]=_VA[_i] end _VA=_va2');
   lines.push('  end');
-  lines.push('  while true do');
-  lines.push('    local '+R.inst+'='+R.code+'['+R.pc+']');
-  lines.push('    '+R.pc+'='+R.pc+'+1');
+  // Layer 39: Dispatch mechanism — randomly select from 2 patterns per build
+  var DISPATCH_VARIANT=Math.floor(Math.random()*2); // 0=__call metamethod, 1=plain function
+  var _tmpVar=rn(),_rvVar=rn();
+  if(DISPATCH_VARIANT===0){
+    lines.push('  local '+R.dispatch+'=setmetatable({},{__call=function(_,'+R.inst+')');
+  }else{
+    lines.push('  local '+R.dispatch);
+    lines.push('  '+R.dispatch+'=function('+R.inst+')');
+  }
   // Layer 34: Polymorphic IR — unmutate instruction operands
   var _imK=rn();
-  lines.push('    local '+_imK+'=bit32.band('+_imSeed+'*('+R.pc+'-1)+'+_imMul+',16777215)');
+  lines.push('    local '+_imK+'='+polyMod16M('('+_imSeed+'*('+R.pc+'-1)+'+_imMul+')'));
   // Build XOR mask: place 3 key bytes at the 3 non-opcode byte positions
   var opBytePos=FIELD_ORDER[0];
   var nonOp=[0,1,2,3].filter(function(p){return p!==opBytePos;}).sort(function(a,b){return a-b;});
   var multipliers=[1,256,65536,16777216];
   var keyExtract=[
-    _imK+'%256',
-    'math.floor('+_imK+'/256)%256',
-    'math.floor('+_imK+'/65536)%256'
+    polyMod256(_imK),
+    polyMod256(polyDiv256(_imK)),
+    polyMod256(polyDiv65536(_imK))
   ];
   var maskTerms=nonOp.map(function(pos,i){
     if(multipliers[pos]===1)return keyExtract[i];
     return keyExtract[i]+'*'+multipliers[pos];
   });
   lines.push('    '+R.inst+'=bit32.bxor('+R.inst+','+maskTerms.join('+')+')');
+  // Helper: generate inline IMUT unmutation for a variable at a given PC expression
+  function genImutUnmask(varName,pcExpr){
+    var k=rn();
+    var ls=[];
+    ls.push('      local '+k+'='+polyMod16M('('+_imSeed+'*('+pcExpr+')+'+_imMul+')'));
+    var kE=[polyMod256(k),polyMod256(polyDiv256(k)),polyMod256(polyDiv65536(k))];
+    var terms=nonOp.map(function(p,i){return multipliers[p]===1?kE[i]:kE[i]+'*'+multipliers[p];});
+    ls.push('      '+varName+'=bit32.bxor('+varName+','+terms.join('+')+')');
+    return ls;
+  }
   // Layer B: delayed OPDEC verification after 500 instructions
   lines.push('    '+R.tCnt+'='+R.tCnt+'+1');
   lines.push('    if '+R.tCnt+'==500 then');
@@ -1907,6 +2159,10 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('      if _c2~=bit32.bxor('+R.tExp2+','+MASK2+') then');
   lines.push('        for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]='+_hiddenName+'[_k]+1 end');
   lines.push('      end');
+  lines.push('    end');
+  // Layer 36: periodic environment integrity check
+  lines.push('    if '+R.tCnt+'%1000==0 and _GENV.rawequal~='+_cachedFn+' then');
+  lines.push('      for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]='+_hiddenName+'[_k]+1 end');
   lines.push('    end');
   lines.push('    local '+R.op+'='+R.OPDEC+'[bit32.bxor('+fieldExpr(R.inst,0)+','+AOXR+')]');
   lines.push('    local '+R.a+'='+fieldExpr(R.inst,1));
@@ -2007,7 +2263,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   ]});
   // JMP
   handlers.push({cond:R.op+'=='+BC.JMP,body:[
-    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-32767',
+    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
     '      '+R.pc+'='+R.pc+'+_sbx'
   ]});
   // EQ
@@ -2059,16 +2315,16 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
     '      local _as={}',
     '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
-    '      return _fn(table.unpack(_as,1,_na))'
+    '      return table.pack(_fn(table.unpack(_as,1,_na)))'
   ]});
   // RETURN
   handlers.push({cond:R.op+'=='+BC.RETURN,body:[
     '      local _b='+fieldExpr(R.inst,2),
     '      local _nr=_b==0 and('+R.top+'-'+R.a+'+1)or(_b-1)',
-    '      if _nr<=0 then return end',
-    '      local _rv={}',
+    '      if _nr<=0 then return {n=0} end',
+    '      local _rv={n=_nr}',
     '      for _i=0,_nr-1 do _rv[_i+1]='+_rget+'('+R.REG+','+R.a+'+_i) end',
-    '      return table.unpack(_rv,1,_nr)'
+    '      return _rv'
   ]});
   // FORLOOP
   handlers.push({cond:R.op+'=='+BC.FORLOOP,body:[
@@ -2077,7 +2333,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      '+_rset+'('+R.REG+','+R.a+',_nv)',
     '      local _limit='+_rget+'('+R.REG+','+R.a+'+1)',
     '      if(_step>0 and _nv<=_limit)or(_step<0 and _nv>=_limit) then',
-    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-32767',
+    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
     '        '+R.pc+'='+R.pc+'+_sbx',
     '        '+_rset+'('+R.REG+','+R.a+'+3,_nv)',
     '      end'
@@ -2085,7 +2341,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   // FORPREP
   handlers.push({cond:R.op+'=='+BC.FORPREP,body:[
     '      '+_rset+'('+R.REG+','+R.a+','+_rget+'('+R.REG+','+R.a+')-'+_rget+'('+R.REG+','+R.a+'+2))',
-    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-32767',
+    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
     '      '+R.pc+'='+R.pc+'+_sbx'
   ]});
   // TFORCALL
@@ -2099,7 +2355,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _v1='+_rget+'('+R.REG+','+R.a+'+1)',
     '      if _v1~=nil then',
     '        '+_rset+'('+R.REG+','+R.a+',_v1)',
-    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-32767',
+    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
     '        '+R.pc+'='+R.pc+'+_sbx',
     '      end'
   ]});
@@ -2116,12 +2372,12 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _bx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256',
     '      local _sp='+R.P+'[_bx+1]',
     '      if type(_sp)=="string" then',
-    '        local _dk=bit32.band('+_fkName+'*(_bx+1)+'+_fmName+',16777215)',
+    '        local _dk='+polyMod16M('('+_fkName+'*(_bx+1)+'+_fmName+')')+'',
     '        local _db={}',
     '        for _i=1,#_sp do',
-    '          local _pb=bit32.bxor(string.byte(_sp,_i),_dk%256)',
+    '          local _pb=bit32.bxor(string.byte(_sp,_i),'+polyMod256('_dk')+')',
     '          _db[_i]=string.char(_pb)',
-    '          _dk=bit32.band(_dk*31+_pb+'+_faName+',16777215)',
+    '          _dk='+polyMod16M('(_dk*31+_pb+'+_faName+')')+'',
     '        end',
     '        _sp=(load or loadstring)(table.concat(_db))()('+R.S+')',
     '        '+R.P+'[_bx+1]=_sp',
@@ -2174,12 +2430,48 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      end'
   ]});
 
+  // SUPER_MRET: MOVE + RETURN(B=2) fused
+  handlers.push({cond:R.op+'=='+BC.SUPER_MRET,body:[
+    '      return {'+_rget+'('+R.REG+','+fieldExpr(R.inst,2)+'),n=1}'
+  ]});
+  // SUPER_KRET: LOADK + RETURN(B=2) fused
+  handlers.push({cond:R.op+'=='+BC.SUPER_KRET,body:[
+    '      return {'+R.K+'['+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256+1],n=1}'
+  ]});
+  // SUPER_GCALL: GETGLOBAL + CALL fused
+  var sgImut=genImutUnmask('_dw',R.pc+'-1');
+  handlers.push({cond:R.op+'=='+BC.SUPER_GCALL,body:[
+    '      local _dw='+R.code+'['+R.pc+']',
+    '      '+R.pc+'='+R.pc+'+1',
+  ].concat(sgImut).concat([
+    '      local _bx='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
+    '      local _fn=_GENV['+R.K+'[_bx+1]]',
+    '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
+    '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
+    '      local _as={}',
+    '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
+    '      local _rv=table.pack(pcall(_fn,table.unpack(_as,1,_na)))',
+    '      if not _rv[1] then error(_rv[2],0) end',
+    '      if _c==0 then',
+    '        for _i=2,_rv.n do '+_rset+'('+R.REG+','+R.a+'+_i-2,_rv[_i]) end',
+    '        '+R.top+'='+R.a+'+_rv.n-2',
+    '      else',
+    '        for _i=1,_c-1 do '+_rset+'('+R.REG+','+R.a+'+_i-1,_rv[_i+1]) end',
+    '      end'
+  ])});
+
   // Dead handlers (5-8 with opaque-false conditions)
   var nDead=5+Math.floor(Math.random()*4);
   for(var di=0;di<nDead;di++){
-    handlers.push({cond:genOpaqueFalse(),body:[
-      '      local '+rn()+'='+Math.floor(Math.random()*9999)
-    ]});
+    if(di===0){
+      handlers.push({cond:genOpaqueFalse(),body:[
+        '      local '+rn()+'='+R.S+'['+watermarkIdx+']'
+      ]});
+    }else{
+      handlers.push({cond:genOpaqueFalse(),body:[
+        '      local '+rn()+'='+Math.floor(Math.random()*9999)
+      ]});
+    }
   }
 
   // Inject noop locals into ~80% of handlers
@@ -2200,13 +2492,27 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
       lines.push(handlers[hi].body[li]);
     }
   }
-  // Close the dispatch
+  // Close dispatch and emit main loop based on variant
   lines.push('    end');
+  if(DISPATCH_VARIANT===0){
+    // __call metamethod: close setmetatable
+    lines.push('  end})');
+  }else{
+    // Plain function: close function definition
+    lines.push('  end');
+  }
+  // Main loop — same for both dispatch variants
+  lines.push('  while true do');
+  lines.push('    local '+_tmpVar+'='+R.code+'['+R.pc+']');
+  lines.push('    '+R.pc+'='+R.pc+'+1');
+  lines.push('    local '+_rvVar+'='+R.dispatch+'('+_tmpVar+')');
+  lines.push('    if '+_rvVar+'~=nil then return table.unpack('+_rvVar+',1,'+_rvVar+'.n) end');
   lines.push('  end');
   lines.push('end');
 
   // Execute the root prototype
   lines.push(R.execute+'('+R.PROTO+',{},{})');
+  lines.push('local '+rn()+'='+encNum(BUILD_ID));
 
   var innerLines=lines.join('\n');
 
@@ -2218,21 +2524,36 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     var re=new RegExp('\\b'+escaped+'\\b','g');
     innerLines=innerLines.replace(re,R.RT+'['+rtKeys[name]+']');
   }
-  // Prepend RT init lines (raw stdlib names — execute before anything else)
-  var rtInitLines=['local '+R.RT+'={}'];
+  // RT init: shuffle assignment order and interleave with dummy locals for anti-fingerprinting
+  // All RT assignments MUST precede any code that uses _RT[N], so they stay contiguous at top
   var shuffledStdlib=STDLIB.slice();
   shuffle(shuffledStdlib);
-  for(var ri=0;ri<shuffledStdlib.length;ri++){
-    rtInitLines.push(R.RT+'['+rtKeys[shuffledStdlib[ri]]+']='+shuffledStdlib[ri]);
+  var rtInitLines=['local '+R.RT+'={}'];
+  // Split into 4-6 groups with dummy locals between them
+  var rtGroupCount=Math.floor(Math.random()*3)+4;
+  var perGroup=Math.ceil(shuffledStdlib.length/rtGroupCount);
+  for(var rg=0;rg<shuffledStdlib.length;rg++){
+    rtInitLines.push(R.RT+'['+rtKeys[shuffledStdlib[rg]]+']='+shuffledStdlib[rg]);
+    // Insert dummy local between groups
+    if((rg+1)%perGroup===0 && rg<shuffledStdlib.length-1){
+      rtInitLines.push('local '+rn()+'='+genOpaqueTrue());
+    }
   }
   innerLines=rtInitLines.join('\n')+'\n'+innerLines;
+
+  // Phase 2.4: getfenv/setfenv override at outer scope (before payload decode)
+  var outerEnvLines=[
+    'local _GE=getgenv and getgenv() or _G',
+    'pcall(function() _GE.getfenv=function() return _GE end end)',
+    'pcall(function() _GE.setfenv=function() end end)'
+  ];
 
   // Try LZW compression + base64 encoding
   var compressed=lzwCompress(innerLines);
   var b64=bytesToBase64(compressed);
   var decompOverhead=900;
   if(b64.length+decompOverhead<innerLines.length*0.85){
-    return lzwDecompressorLua(b64);
+    return lzwDecompressorLua(b64,outerEnvLines);
   }
 
   // Fallback: uncompressed wrap in load([=[...]=])
@@ -2241,16 +2562,16 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   var open='['+'='.repeat(lvl)+'[';
   var close=']'+'='.repeat(lvl)+']';
 
-  return[
-    'local _ls=load or loadstring',
-    'if not _ls then return end',
-    'local _fn,_err=_ls('+open,
-    innerLines,
-    close+')',
-    'if not _fn then return end',
-    'local _ok,_e=pcall(_fn)',
-    'if not _ok then end',
-  ].join('\n');
+  var fallbackLines=outerEnvLines.slice();
+  fallbackLines.push('local _ls=load or loadstring');
+  fallbackLines.push('if not _ls then return end');
+  fallbackLines.push('local _fn,_err=_ls('+open);
+  fallbackLines.push(innerLines);
+  fallbackLines.push(close+')');
+  fallbackLines.push('if not _fn then return end');
+  fallbackLines.push('local _ok,_e=pcall(_fn)');
+  fallbackLines.push('if not _ok then end');
+  return fallbackLines.join('\n');
 }
 
 // ─── COMPRESSION ─────────────────────────────────────────────────────────────
@@ -2280,57 +2601,111 @@ function bytesToBase64(bytes){
   return btoa(s);
 }
 
-function lzwDecompressorLua(b64){
+function lzwDecompressorLua(b64,outerEnvLines){
+  // Random variable name generator for decompressor scope
+  var _lzwUsed=new Set();
+  function ln(){
+    var pool='lLiI1';var s;
+    do{s='_';var len=5+Math.floor(Math.random()*5);
+      for(var i=0;i<len;i++)s+=pool[Math.floor(Math.random()*pool.length)];
+    }while(_lzwUsed.has(s));
+    _lzwUsed.add(s);return s;
+  }
+  var variant=Math.floor(Math.random()*3);
+  var _ls=ln(),_cd=ln(),_b64=ln(),_b64d=ln(),_bd=ln(),_bn=ln();
+  var _a=ln(),_b=ln(),_c=ln(),_d=ln(),_v=ln(),_i=ln();
+  var _cb=ln(),_pad=ln(),_dt=ln(),_ds=ln(),_di=ln(),_w=ln();
+  var _out=ln(),_oc=ln(),_code=ln(),_entry=ln(),_src=ln(),_fn=ln(),_err=ln(),_ok=ln(),_e=ln();
   var lines=[];
-  lines.push('local _ls=load or loadstring');
-  lines.push('if not _ls then return end');
-  lines.push('local _cd="'+b64+'"');
-  lines.push('local _b64="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"');
-  lines.push('local _b64d={}');
-  lines.push('for _i=1,64 do _b64d[string.byte(_b64,_i)]=_i-1 end');
-  lines.push('local _bd={}');
-  lines.push('local _bn=0');
-  lines.push('for _i=1,#_cd,4 do');
-  lines.push('local _a=_b64d[string.byte(_cd,_i)] or 0');
-  lines.push('local _b=_b64d[string.byte(_cd,_i+1)] or 0');
-  lines.push('local _c=_b64d[string.byte(_cd,_i+2)] or 0');
-  lines.push('local _d=_b64d[string.byte(_cd,_i+3)] or 0');
-  lines.push('local _v=_a*262144+_b*4096+_c*64+_d');
-  lines.push('_bn=_bn+1');
-  lines.push('_bd[_bn]=string.char(math.floor(_v/65536),math.floor(_v/256)%256,_v%256)');
-  lines.push('end');
-  lines.push('local _cb=table.concat(_bd)');
-  lines.push('local _pad=0');
-  lines.push('if string.byte(_cd,#_cd)==61 then _pad=_pad+1 end');
-  lines.push('if #_cd>1 and string.byte(_cd,#_cd-1)==61 then _pad=_pad+1 end');
-  lines.push('if _pad>0 then _cb=string.sub(_cb,1,#_cb-_pad) end');
-  lines.push('local _dt={}');
-  lines.push('for _i=0,255 do _dt[_i]=string.char(_i) end');
-  lines.push('local _ds=256');
-  lines.push('local _di=1');
-  lines.push('local _w=nil');
-  lines.push('local _out={}');
-  lines.push('local _oc=0');
-  lines.push('while _di<#_cb do');
-  lines.push('local _code=string.byte(_cb,_di)+string.byte(_cb,_di+1)*256');
-  lines.push('_di=_di+2');
-  lines.push('local _entry');
-  lines.push('if _dt[_code] then _entry=_dt[_code]');
-  lines.push('elseif _code==_ds and _w then _entry=_w..string.sub(_w,1,1)');
+  lines.push('local '+_ls+'=load or loadstring');
+  lines.push('if not '+_ls+' then return end');
+  // Outer env lines (getfenv/setfenv override) inserted before payload decode
+  if(outerEnvLines){for(var oe=0;oe<outerEnvLines.length;oe++)lines.push(outerEnvLines[oe]);}
+  lines.push('local '+_cd+'="'+b64+'"');
+  // Base64 decode — 3 structural variants
+  if(variant===0){
+    // Variant A: multiplication-based, for-loop lookup build
+    lines.push('local '+_b64+'="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"');
+    lines.push('local '+_b64d+'={}');
+    lines.push('for '+_i+'=1,64 do '+_b64d+'[string.byte('+_b64+','+_i+')]='+_i+'-1 end');
+    lines.push('local '+_bd+'={}');
+    lines.push('local '+_bn+'=0');
+    lines.push('for '+_i+'=1,#'+_cd+',4 do');
+    lines.push('local '+_a+'='+_b64d+'[string.byte('+_cd+','+_i+')] or 0');
+    lines.push('local '+_b+'='+_b64d+'[string.byte('+_cd+','+_i+'+1)] or 0');
+    lines.push('local '+_c+'='+_b64d+'[string.byte('+_cd+','+_i+'+2)] or 0');
+    lines.push('local '+_d+'='+_b64d+'[string.byte('+_cd+','+_i+'+3)] or 0');
+    lines.push('local '+_v+'='+_a+'*262144+'+_b+'*4096+'+_c+'*64+'+_d);
+    lines.push(_bn+'='+_bn+'+1');
+    lines.push(_bd+'['+_bn+']=string.char(math.floor('+_v+'/65536),math.floor('+_v+'/256)%256,'+_v+'%256)');
+    lines.push('end');
+  }else if(variant===1){
+    // Variant B: bit32 shift-based, gmatch lookup build
+    lines.push('local '+_b64+'="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"');
+    lines.push('local '+_b64d+'={}');
+    var _ch=ln(),_pos=ln();
+    lines.push('do local '+_pos+'=0 for '+_ch+' in string.gmatch('+_b64+',".")');
+    lines.push('do '+_b64d+'[string.byte('+_ch+')]='+_pos+' '+_pos+'='+_pos+'+1 end end');
+    lines.push('local '+_bd+'={}');
+    lines.push('local '+_bn+'=0');
+    lines.push('for '+_i+'=1,#'+_cd+',4 do');
+    lines.push('local '+_a+'='+_b64d+'[string.byte('+_cd+','+_i+')] or 0');
+    lines.push('local '+_b+'='+_b64d+'[string.byte('+_cd+','+_i+'+1)] or 0');
+    lines.push('local '+_c+'='+_b64d+'[string.byte('+_cd+','+_i+'+2)] or 0');
+    lines.push('local '+_d+'='+_b64d+'[string.byte('+_cd+','+_i+'+3)] or 0');
+    lines.push('local '+_v+'=bit32.bor(bit32.lshift('+_a+',18),bit32.lshift('+_b+',12),bit32.lshift('+_c+',6),'+_d+')');
+    lines.push(_bn+'='+_bn+'+1');
+    lines.push(_bd+'['+_bn+']=string.char(bit32.rshift('+_v+',16),bit32.band(bit32.rshift('+_v+',8),255),bit32.band('+_v+',255))');
+    lines.push('end');
+  }else{
+    // Variant C: accumulator-based, string.char accumulation
+    lines.push('local '+_b64+'="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"');
+    lines.push('local '+_b64d+'={}');
+    lines.push('for '+_i+'=1,#'+_b64+' do '+_b64d+'[string.sub('+_b64+','+_i+','+_i+')]='+_i+'-1 end');
+    lines.push('local '+_bd+'={}');
+    lines.push('local '+_bn+'=0');
+    lines.push('for '+_i+'=1,#'+_cd+',4 do');
+    lines.push('local '+_v+'='+_b64d+'[string.sub('+_cd+','+_i+','+_i+')] or 0');
+    lines.push(_v+'='+_v+'*64+('+_b64d+'[string.sub('+_cd+','+_i+'+1,'+_i+'+1)] or 0)');
+    lines.push(_v+'='+_v+'*64+('+_b64d+'[string.sub('+_cd+','+_i+'+2,'+_i+'+2)] or 0)');
+    lines.push(_v+'='+_v+'*64+('+_b64d+'[string.sub('+_cd+','+_i+'+3,'+_i+'+3)] or 0)');
+    lines.push(_bn+'='+_bn+'+1');
+    lines.push(_bd+'['+_bn+']=string.char(math.floor('+_v+'/65536),math.floor('+_v+'/256)%256,'+_v+'%256)');
+    lines.push('end');
+  }
+  lines.push('local '+_cb+'=table.concat('+_bd+')');
+  lines.push('local '+_pad+'=0');
+  lines.push('if string.byte('+_cd+',#'+_cd+')==61 then '+_pad+'='+_pad+'+1 end');
+  lines.push('if #'+_cd+'>1 and string.byte('+_cd+',#'+_cd+'-1)==61 then '+_pad+'='+_pad+'+1 end');
+  lines.push('if '+_pad+'>0 then '+_cb+'=string.sub('+_cb+',1,#'+_cb+'-'+_pad+') end');
+  // LZW decompress — shared across variants (different var names already provide variation)
+  lines.push('local '+_dt+'={}');
+  lines.push('for '+_i+'=0,255 do '+_dt+'['+_i+']=string.char('+_i+') end');
+  lines.push('local '+_ds+'=256');
+  lines.push('local '+_di+'=1');
+  lines.push('local '+_w+'=nil');
+  lines.push('local '+_out+'={}');
+  lines.push('local '+_oc+'=0');
+  lines.push('while '+_di+'<#'+_cb+' do');
+  lines.push('local '+_code+'=string.byte('+_cb+','+_di+')+string.byte('+_cb+','+_di+'+1)*256');
+  lines.push(_di+'='+_di+'+2');
+  lines.push('local '+_entry);
+  lines.push('if '+_dt+'['+_code+'] then '+_entry+'='+_dt+'['+_code+']');
+  lines.push('elseif '+_code+'=='+_ds+' and '+_w+' then '+_entry+'='+_w+'..string.sub('+_w+',1,1)');
   lines.push('else break end');
-  lines.push('_oc=_oc+1');
-  lines.push('_out[_oc]=_entry');
-  lines.push('if _w and _ds<65536 then');
-  lines.push('_dt[_ds]=_w..string.sub(_entry,1,1)');
-  lines.push('_ds=_ds+1');
+  lines.push(_oc+'='+_oc+'+1');
+  lines.push(_out+'['+_oc+']='+_entry);
+  lines.push('if '+_w+' and '+_ds+'<65536 then');
+  lines.push(_dt+'['+_ds+']='+_w+'..string.sub('+_entry+',1,1)');
+  lines.push(_ds+'='+_ds+'+1');
   lines.push('end');
-  lines.push('_w=_entry');
+  lines.push(_w+'='+_entry);
   lines.push('end');
-  lines.push('local _src=table.concat(_out)');
-  lines.push('local _fn,_err=_ls(_src)');
-  lines.push('if not _fn then return end');
-  lines.push('local _ok,_e=pcall(_fn)');
-  lines.push('if not _ok then end');
+  lines.push('local '+_src+'=table.concat('+_out+')');
+  lines.push('local '+_fn+','+_err+'='+_ls+'('+_src+')');
+  lines.push('if not '+_fn+' then return end');
+  lines.push('local '+_ok+','+_e+'=pcall('+_fn+')');
+  lines.push('if not '+_ok+' then end');
   return lines.join('\n');
 }
 
@@ -2339,8 +2714,13 @@ function obfuscateBytecodeVM(src){
   var tokens=tokenize(src);
   var ast=parse(tokens);
   var OPMAP=genBytecodeOpcodeMap();
+  var BUILD_ID=Math.floor(Math.random()*0xFFFFFFFF);
+  var BUILD_TS=new Date().toISOString().slice(0,19).replace('T',' ');
+  var MBA_TEMPLATE=Math.floor(Math.random()*3);
   // Compile AST to prototype
   var proto=bcCompileTopLevel(ast);
+  // Fuse common instruction sequences into superoperators
+  fuseInstructions(proto);
   // Inject garbage bytecode (dead instructions + opaque branches)
   injectGarbage(proto);
   // String dedup
@@ -2349,6 +2729,8 @@ function obfuscateBytecodeVM(src){
     if(!_strMap.has(s)){_strMap.set(s,_strArr.length+1);_strArr.push(s);}
     return'_SS['+_strMap.get(s)+']';
   }
+  encStr(BUILD_TS);
+  var watermarkIdx=_strArr.length;
   function rand(lo,hi){return Math.floor(Math.random()*(hi-lo+1))+lo;}
   function encNum(n,depth){
     if(!isFinite(n))return n>0?'(1/0)':'-(1/0)';
@@ -2416,7 +2798,7 @@ function obfuscateBytecodeVM(src){
   }
   var imutSeedExpr=encNum(IMUT_SEED);
   var imutMulExpr=encNum(IMUT_MUL);
-  return generateBytecodeVM(OPMAP,protoStr,_strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr,imutSeedExpr,imutMulExpr);
+  return generateBytecodeVM(OPMAP,protoStr,_strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr,imutSeedExpr,imutMulExpr,BUILD_ID,watermarkIdx,MBA_TEMPLATE,encNum);
 }
 </script>
 </body>
