@@ -515,6 +515,7 @@ var BC={
   NOP:45,CLOSE:46
 };
 var BC_COUNT=47;
+var GARBAGE_OP=255;
 
 function bcEncode(op,a,b,c){return(op&0xFF)|((a&0xFF)<<8)|((b&0xFF)<<16)|((c&0xFF)<<24);}
 function bcEncodeBx(op,a,bx){return(op&0xFF)|((a&0xFF)<<8)|((bx&0xFFFF)<<16);}
@@ -1288,6 +1289,126 @@ function bcCompileTopLevel(ast){
   return proto;
 }
 
+// ─── GARBAGE BYTECODE INJECTION ──────────────────────────────────────────────
+function injectGarbage(proto){
+  for(var i=0;i<proto.p.length;i++) injectGarbage(proto.p[i]);
+  var codeLen=proto.code.length;
+  if(codeLen<4) return;
+  // Identify protected positions: instruction after any skip-next opcode
+  var protectedPos=new Set();
+  for(var pc=0;pc<codeLen;pc++){
+    var inst=proto.code[pc];
+    var op=inst&0xFF;
+    if(op===BC.EQ||op===BC.LT||op===BC.LE||op===BC.TEST||op===BC.TESTSET){
+      protectedPos.add(pc+1);
+    }
+    if(op===BC.LOADBOOL&&((inst>>24)&0xFF)!==0){
+      protectedPos.add(pc+1);
+    }
+  }
+  var nInsert=Math.max(2,Math.floor(codeLen*0.18));
+  var usedPos=new Set();
+  var insertions=[];
+  var needsTempReg=false;
+  for(var i=0;i<nInsert;i++){
+    var pos,tries=0;
+    do{pos=Math.floor(Math.random()*(codeLen+1));tries++;}
+    while((usedPos.has(pos)||protectedPos.has(pos))&&tries<200);
+    if(tries>=200) continue;
+    usedPos.add(pos);
+    var r=Math.random();
+    if(r<0.20){
+      // Opaque conditional branch: LOADBOOL + TEST + JMP + garbage
+      var tempReg=proto.maxstack;
+      var blockLen=2+Math.floor(Math.random()*3);
+      var instrs;
+      if(Math.random()<0.5){
+        // Variant A: LOADBOOL true, TEST C=1 → (not true)==(1~=0) → false → don't skip → JMP taken
+        instrs=[
+          bcEncode(BC.LOADBOOL,tempReg,1,0),
+          bcEncode(BC.TEST,tempReg,0,1),
+          bcEncodesBx(BC.JMP,0,blockLen)
+        ];
+      }else{
+        // Variant B: LOADBOOL false, TEST C=0 → (not false)==(0~=0) → true==false → false → don't skip → JMP taken
+        instrs=[
+          bcEncode(BC.LOADBOOL,tempReg,0,0),
+          bcEncode(BC.TEST,tempReg,0,0),
+          bcEncodesBx(BC.JMP,0,blockLen)
+        ];
+      }
+      for(var gi=0;gi<blockLen;gi++){
+        instrs.push(bcEncode(GARBAGE_OP,Math.floor(Math.random()*256),Math.floor(Math.random()*256),Math.floor(Math.random()*256)));
+      }
+      insertions.push({pos:pos,instrs:instrs});
+      needsTempReg=true;
+    }else if(r<0.55){
+      // JMP-over-block: JMP + garbage
+      var blockLen=2+Math.floor(Math.random()*3);
+      var instrs=[bcEncodesBx(BC.JMP,0,blockLen)];
+      for(var gi=0;gi<blockLen;gi++){
+        instrs.push(bcEncode(GARBAGE_OP,Math.floor(Math.random()*256),Math.floor(Math.random()*256),Math.floor(Math.random()*256)));
+      }
+      insertions.push({pos:pos,instrs:instrs});
+    }else{
+      // Single garbage NOP
+      insertions.push({pos:pos,instrs:[
+        bcEncode(GARBAGE_OP,Math.floor(Math.random()*256),Math.floor(Math.random()*256),Math.floor(Math.random()*256))
+      ]});
+    }
+  }
+  if(needsTempReg) proto.maxstack++;
+  insertions.sort(function(a,b){return a.pos-b.pos;});
+  // Build cumulative insertion count per position
+  var totalInserted=[];
+  var cumulative=0;
+  var insIdx=0;
+  for(var pc=0;pc<=codeLen;pc++){
+    while(insIdx<insertions.length&&insertions[insIdx].pos===pc){
+      cumulative+=insertions[insIdx].instrs.length;
+      insIdx++;
+    }
+    totalInserted[pc]=cumulative;
+  }
+  function newPC(oldPC){return oldPC+(totalInserted[oldPC]||0);}
+  // Fix jump targets in existing instructions
+  var jumpOps=[BC.JMP,BC.FORLOOP,BC.FORPREP,BC.TFORLOOP];
+  for(var pc=0;pc<codeLen;pc++){
+    var inst=proto.code[pc];
+    var op=inst&0xFF;
+    for(var ji=0;ji<jumpOps.length;ji++){
+      if(op===jumpOps[ji]){
+        var a=(inst>>8)&0xFF;
+        var bx=(inst>>16)&0xFFFF;
+        var sbx=bx-32767;
+        var oldTarget=pc+1+sbx;
+        var newSbx=newPC(oldTarget)-newPC(pc)-1;
+        proto.code[pc]=bcEncodesBx(op,a,newSbx);
+        break;
+      }
+    }
+  }
+  // Build new code array with insertions spliced in
+  var newCode=[];
+  insIdx=0;
+  for(var pc=0;pc<codeLen;pc++){
+    while(insIdx<insertions.length&&insertions[insIdx].pos===pc){
+      for(var gi=0;gi<insertions[insIdx].instrs.length;gi++){
+        newCode.push(insertions[insIdx].instrs[gi]);
+      }
+      insIdx++;
+    }
+    newCode.push(proto.code[pc]);
+  }
+  while(insIdx<insertions.length){
+    for(var gi=0;gi<insertions[insIdx].instrs.length;gi++){
+      newCode.push(insertions[insIdx].instrs[gi]);
+    }
+    insIdx++;
+  }
+  proto.code=newCode;
+}
+
 // ─── BYTECODE OPCODE MAP ─────────────────────────────────────────────────────
 function genBytecodeOpcodeMap(){
   var ALIAS_PER=3;
@@ -1321,24 +1442,33 @@ function genBytecodeOpcodeMap(){
   return{OP:OP,OP_ALIASES:OP_ALIASES,DEAD:DEAD};
 }
 
+function luaByteLiteral(bytes){
+  if(bytes.length===0)return'""';
+  return'"'+bytes.map(function(b){return'\\'+b;}).join('')+'"';
+}
+
 // ─── PROTOTYPE SERIALIZER ────────────────────────────────────────────────────
-function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER){
+function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD){
   // Encode instructions with opcode substitution + field permutation + XOR
   var encCode=proto.code.map(function(inst){
     var op=(inst)&0xFF;
     var a=(inst>>8)&0xFF;
     var b=(inst>>16)&0xFF;
     var c=(inst>>24)&0xFF;
-    // Substitute opcode: find which canonical opcode this is, pick random alias
-    var opName=null;
-    var opKeys=Object.keys(BC);
-    for(var oki=0;oki<opKeys.length;oki++){
-      if(BC[opKeys[oki]]===op){opName=opKeys[oki];break;}
-    }
+    // Substitute opcode: garbage → random DEAD value, real → random alias
     var newOp=op;
-    if(opName&&OPMAP.OP[opName]!==undefined){
-      var allOps=[OPMAP.OP[opName]].concat(OPMAP.OP_ALIASES[opName]||[]);
-      newOp=allOps[Math.floor(Math.random()*allOps.length)];
+    if(op===GARBAGE_OP){
+      newOp=OPMAP.DEAD[Math.floor(Math.random()*OPMAP.DEAD.length)];
+    }else{
+      var opName=null;
+      var opKeys=Object.keys(BC);
+      for(var oki=0;oki<opKeys.length;oki++){
+        if(BC[opKeys[oki]]===op){opName=opKeys[oki];break;}
+      }
+      if(opName&&OPMAP.OP[opName]!==undefined){
+        var allOps=[OPMAP.OP[opName]].concat(OPMAP.OP_ALIASES[opName]||[]);
+        newOp=allOps[Math.floor(Math.random()*allOps.length)];
+      }
     }
     // XOR the opcode
     newOp=newOp^AOXR;
@@ -1352,24 +1482,48 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER){
   });
   var codeStr='{'+encCode.join(',')+'}';
   // Serialize constants
-  var kParts=proto.k.map(function(v){
+  var kParts=proto.k.map(function(v,idx){
     if(v===null||v===undefined)return'{0}';
     if(v===true)return'{1,1}';
     if(v===false)return'{1,0}';
-    if(typeof v==='number')return'{2,'+encNum(v)+'}';
+    if(typeof v==='number'){
+      if(Number.isInteger(v)&&v>=0&&v<=0x7FFFFFFF){
+        var kKey=((KENC_KEY*(idx+1)+KENC_MUL)&0xFFFFFF);
+        return'{2,'+encNum((v^kKey)>>>0)+',1}';
+      }
+      return'{2,'+encNum(v)+'}';
+    }
     if(typeof v==='string')return'{3,'+encStr(v)+'}';
     return'{0}';
   });
   var kStr='{'+kParts.join(',')+'}';
   // Sub-prototypes
-  var pStr='{'+proto.p.map(function(sp){return bcSerializePrototype(sp,encStr,encNum,OPMAP,AOXR,FIELD_ORDER);}).join(',')+'}';
+  var pParts=proto.p.map(function(sp,idx){
+    var subStr=bcSerializePrototype(sp,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD);
+    var factoryStr='return function(_SS) return '+subStr+' end';
+    var encBytes=encryptProtoString(factoryStr,idx,FENC_KEY,FENC_MUL,FENC_ADD);
+    return luaByteLiteral(encBytes);
+  });
+  var pStr='{'+pParts.join(',')+'}';
   // Upvalue descriptors
   var upStr='{'+proto.updescs.map(function(d){return'{'+(d.instack?1:0)+','+d.idx+'}';}).join(',')+'}';
   return'{'+[codeStr,kStr,pStr,upStr,proto.numparams,proto.is_vararg?'true':'false',proto.maxstack].join(',')+'}';
 }
 
+function encryptProtoString(plainStr,protoIdx,FENC_KEY,FENC_MUL,FENC_ADD){
+  var keyState=((FENC_KEY*(protoIdx+1)+FENC_MUL)&0xFFFFFF);
+  var encrypted=[];
+  for(var i=0;i<plainStr.length;i++){
+    var plainByte=plainStr.charCodeAt(i)&0xFF;
+    var encByte=plainByte^(keyState&0xFF);
+    encrypted.push(encByte);
+    keyState=((keyState*31+plainByte+FENC_ADD)&0xFFFFFF);
+  }
+  return encrypted;
+}
+
 // ─── BYTECODE VM GENERATOR ──────────────────────────────────────────────────
-function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys){
+function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr){
   // Reuse name generator and encryption from tree-walking mode
   var _usedNames=new Set();
   function rn(){
@@ -1421,11 +1575,6 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     for(var avi=0;avi<allVals.length;avi++){
       opdecEntries.push('['+allVals[avi]+']='+canonical);
     }
-  }
-
-  function luaByteLiteral(bytes){
-    if(bytes.length===0)return'""';
-    return'"'+bytes.map(function(b){return'\\'+b;}).join('')+'"';
   }
 
   // Encrypt strings
@@ -1642,18 +1791,35 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+R.PROTO+'=(load or loadstring)(table.concat('+R.dpAST+'))()('+R.S+')');
   lines.push(R.EAST+'=nil '+R.dpAST+'=nil '+R.dkAST+'=nil');
 
-  // Decode constants: {0}=nil, {1,v}=bool, {2,v}=num, {3,v}=str
+  // Per-proto encryption keys
+  var _fkName=rn(),_fmName=rn(),_faName=rn();
+  lines.push('local '+_fkName+'='+fencKeyExpr);
+  lines.push('local '+_fmName+'='+fencMulExpr);
+  lines.push('local '+_faName+'='+fencAddExpr);
+
+  // Decode constants: lazy metatable with encrypted integers
   var _decK=rn();
-  lines.push('local function '+_decK+'(_kt)');
-  lines.push('  local _ks={}');
+  lines.push('local function '+_decK+'(_kt,_kk,_km)');
+  lines.push('  local _raw={}');
   lines.push('  for _i,_c in ipairs(_kt) do');
-  lines.push('    if _c[1]==0 then _ks[_i]=nil');
-  lines.push('    elseif _c[1]==1 then _ks[_i]=_c[2]==1');
-  lines.push('    elseif _c[1]==2 then _ks[_i]=_c[2]');
-  lines.push('    elseif _c[1]==3 then _ks[_i]=_c[2]');
+  lines.push('    if _c[1]==0 then _raw[_i]={0}');
+  lines.push('    elseif _c[1]==1 then _raw[_i]={1,_c[2]==1}');
+  lines.push('    elseif _c[1]==2 then');
+  lines.push('      if _c[3] then _raw[_i]={2,_c[2],_i}');
+  lines.push('      else _raw[_i]={1,_c[2]} end');
+  lines.push('    elseif _c[1]==3 then _raw[_i]={1,_c[2]}');
   lines.push('    end');
   lines.push('  end');
-  lines.push('  return _ks');
+  lines.push('  return setmetatable({},{__index=function(_t,_i)');
+  lines.push('    local _e=_raw[_i]');
+  lines.push('    if _e==nil then return nil end');
+  lines.push('    if _e[1]==1 then rawset(_t,_i,_e[2]) return _e[2]');
+  lines.push('    elseif _e[1]==0 then return nil');
+  lines.push('    elseif _e[1]==2 then');
+  lines.push('      local _v=bit32.bxor(_e[2],bit32.band(_kk*_e[3]+_km,16777215))');
+  lines.push('      rawset(_t,_i,_v) return _v');
+  lines.push('    end');
+  lines.push('  end})');
   lines.push('end');
 
   // Register read helper (unwraps upvalue cells)
@@ -1680,7 +1846,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+R.execute);
   lines.push(R.execute+'=function('+R.PROTO+','+R.upvals+','+R.varargs+')');
   lines.push('  local '+R.code+'='+R.PROTO+'[1]');
-  lines.push('  local '+R.K+'='+_decK+'('+R.PROTO+'[2])');
+  lines.push('  local '+R.K+'='+_decK+'('+R.PROTO+'[2],'+kEncKeyExpr+','+kEncMulExpr+')');
   lines.push('  local '+R.P+'='+R.PROTO+'[3]');
   lines.push('  local '+R.REG+'={}');
   lines.push('  local '+R.pc+'=1');
@@ -1908,10 +2074,21 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _tbl='+_rget+'('+R.REG+','+R.a+')',
     '      for _i=1,_nb do _tbl[_off+_i]='+_rget+'('+R.REG+','+R.a+'+_i) end'
   ]});
-  // CLOSURE
+  // CLOSURE (with per-proto decryption)
   handlers.push({cond:R.op+'=='+BC.CLOSURE,body:[
     '      local _bx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256',
     '      local _sp='+R.P+'[_bx+1]',
+    '      if type(_sp)=="string" then',
+    '        local _dk=bit32.band('+_fkName+'*(_bx+1)+'+_fmName+',16777215)',
+    '        local _db={}',
+    '        for _i=1,#_sp do',
+    '          local _pb=bit32.bxor(string.byte(_sp,_i),_dk%256)',
+    '          _db[_i]=string.char(_pb)',
+    '          _dk=bit32.band(_dk*31+_pb+'+_faName+',16777215)',
+    '        end',
+    '        _sp=(load or loadstring)(table.concat(_db))()('+R.S+')',
+    '        '+R.P+'[_bx+1]=_sp',
+    '      end',
     '      local _su={}',
     '      if _sp[4] then',
     '        for _i,_d in ipairs(_sp[4]) do',
@@ -2013,7 +2190,15 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   }
   innerLines=rtInitLines.join('\n')+'\n'+innerLines;
 
-  // Wrap in load([=[...]=])
+  // Try LZW compression + base64 encoding
+  var compressed=lzwCompress(innerLines);
+  var b64=bytesToBase64(compressed);
+  var decompOverhead=900;
+  if(b64.length+decompOverhead<innerLines.length*0.85){
+    return lzwDecompressorLua(b64);
+  }
+
+  // Fallback: uncompressed wrap in load([=[...]=])
   var lvl=0;
   while(innerLines.includes(']'+'='.repeat(lvl)+']'))lvl++;
   var open='['+'='.repeat(lvl)+'[';
@@ -2031,6 +2216,87 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   ].join('\n');
 }
 
+// ─── COMPRESSION ─────────────────────────────────────────────────────────────
+function lzwCompress(input){
+  var dict={},dictSize=256;
+  for(var i=0;i<256;i++)dict[String.fromCharCode(i)]=i;
+  var w='',result=[];
+  for(var i=0;i<input.length;i++){
+    var wc=w+input[i];
+    if(dict[wc]!==undefined){w=wc;}
+    else{result.push(dict[w]);if(dictSize<65536)dict[wc]=dictSize++;w=input[i];}
+  }
+  if(w)result.push(dict[w]);
+  var bytes=[];
+  for(var i=0;i<result.length;i++){
+    bytes.push(result[i]&0xFF);
+    bytes.push((result[i]>>8)&0xFF);
+  }
+  return bytes;
+}
+
+function bytesToBase64(bytes){
+  var chunk=8192,s='';
+  for(var i=0;i<bytes.length;i+=chunk){
+    s+=String.fromCharCode.apply(null,bytes.slice(i,Math.min(i+chunk,bytes.length)));
+  }
+  return btoa(s);
+}
+
+function lzwDecompressorLua(b64){
+  var lines=[];
+  lines.push('local _ls=load or loadstring');
+  lines.push('if not _ls then return end');
+  lines.push('local _cd="'+b64+'"');
+  lines.push('local _b64="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"');
+  lines.push('local _b64d={}');
+  lines.push('for _i=1,64 do _b64d[string.byte(_b64,_i)]=_i-1 end');
+  lines.push('local _bd={}');
+  lines.push('local _bn=0');
+  lines.push('for _i=1,#_cd,4 do');
+  lines.push('local _a=_b64d[string.byte(_cd,_i)] or 0');
+  lines.push('local _b=_b64d[string.byte(_cd,_i+1)] or 0');
+  lines.push('local _c=_b64d[string.byte(_cd,_i+2)] or 0');
+  lines.push('local _d=_b64d[string.byte(_cd,_i+3)] or 0');
+  lines.push('local _v=_a*262144+_b*4096+_c*64+_d');
+  lines.push('_bn=_bn+1');
+  lines.push('_bd[_bn]=string.char(math.floor(_v/65536),math.floor(_v/256)%256,_v%256)');
+  lines.push('end');
+  lines.push('local _cb=table.concat(_bd)');
+  lines.push('local _pad=0');
+  lines.push('if string.byte(_cd,#_cd)==61 then _pad=_pad+1 end');
+  lines.push('if #_cd>1 and string.byte(_cd,#_cd-1)==61 then _pad=_pad+1 end');
+  lines.push('if _pad>0 then _cb=string.sub(_cb,1,#_cb-_pad) end');
+  lines.push('local _dt={}');
+  lines.push('for _i=0,255 do _dt[_i]=string.char(_i) end');
+  lines.push('local _ds=256');
+  lines.push('local _di=1');
+  lines.push('local _w=nil');
+  lines.push('local _out={}');
+  lines.push('local _oc=0');
+  lines.push('while _di<#_cb do');
+  lines.push('local _code=string.byte(_cb,_di)+string.byte(_cb,_di+1)*256');
+  lines.push('_di=_di+2');
+  lines.push('local _entry');
+  lines.push('if _dt[_code] then _entry=_dt[_code]');
+  lines.push('elseif _code==_ds and _w then _entry=_w..string.sub(_w,1,1)');
+  lines.push('else break end');
+  lines.push('_oc=_oc+1');
+  lines.push('_out[_oc]=_entry');
+  lines.push('if _w and _ds<65536 then');
+  lines.push('_dt[_ds]=_w..string.sub(_entry,1,1)');
+  lines.push('_ds=_ds+1');
+  lines.push('end');
+  lines.push('_w=_entry');
+  lines.push('end');
+  lines.push('local _src=table.concat(_out)');
+  lines.push('local _fn,_err=_ls(_src)');
+  lines.push('if not _fn then return end');
+  lines.push('local _ok,_e=pcall(_fn)');
+  lines.push('if not _ok then end');
+  return lines.join('\n');
+}
+
 // ─── BYTECODE ENTRY POINT ────────────────────────────────────────────────────
 function obfuscateBytecodeVM(src){
   var tokens=tokenize(src);
@@ -2038,6 +2304,8 @@ function obfuscateBytecodeVM(src){
   var OPMAP=genBytecodeOpcodeMap();
   // Compile AST to prototype
   var proto=bcCompileTopLevel(ast);
+  // Inject garbage bytecode (dead instructions + opaque branches)
+  injectGarbage(proto);
   // String dedup
   var _strMap=new Map(),_strArr=[];
   function encStr(s){
@@ -2080,7 +2348,18 @@ function obfuscateBytecodeVM(src){
     var ft=FIELD_ORDER[fo];FIELD_ORDER[fo]=FIELD_ORDER[fj];FIELD_ORDER[fj]=ft;
   }
   var AOXR=Math.floor(Math.random()*253)+1;
-  var protoStr=bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER);
+  // K table encryption keys
+  var KENC_KEY=Math.floor(Math.random()*0xFFFF)+1;
+  var KENC_MUL=Math.floor(Math.random()*900)+100;
+  var FENC_KEY=Math.floor(Math.random()*0xFFFFFF)+1;
+  var FENC_MUL=Math.floor(Math.random()*900)+100;
+  var FENC_ADD=Math.floor(Math.random()*254)+1;
+  var protoStr=bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD);
+  var kEncKeyExpr=encNum(KENC_KEY);
+  var kEncMulExpr=encNum(KENC_MUL);
+  var fencKeyExpr=encNum(FENC_KEY);
+  var fencMulExpr=encNum(FENC_MUL);
+  var fencAddExpr=encNum(FENC_ADD);
   // Reference Indirection: stdlib lookup table
   var STDLIB=[
     'bit32.bxor','bit32.band','bit32.bor','bit32.bnot','bit32.rshift','bit32.lshift',
@@ -2095,7 +2374,7 @@ function obfuscateBytecodeVM(src){
     var k;do{k=Math.floor(Math.random()*200)+1;}while(usedRTKeys.has(k));
     usedRTKeys.add(k);rtKeys[STDLIB[si]]=k;
   }
-  return generateBytecodeVM(OPMAP,protoStr,_strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys);
+  return generateBytecodeVM(OPMAP,protoStr,_strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr);
 }
 </script>
 </body>
