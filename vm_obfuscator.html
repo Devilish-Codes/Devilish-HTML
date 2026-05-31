@@ -1448,9 +1448,9 @@ function luaByteLiteral(bytes){
 }
 
 // ─── PROTOTYPE SERIALIZER ────────────────────────────────────────────────────
-function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD){
-  // Encode instructions with opcode substitution + field permutation + XOR
-  var encCode=proto.code.map(function(inst){
+function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD,IMUT_SEED,IMUT_MUL){
+  // Encode instructions with opcode substitution + field permutation + XOR + polymorphic IR mutation
+  var encCode=proto.code.map(function(inst,instIdx){
     var op=(inst)&0xFF;
     var a=(inst>>8)&0xFF;
     var b=(inst>>16)&0xFF;
@@ -1478,6 +1478,16 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
     bytes[FIELD_ORDER[1]]=a;
     bytes[FIELD_ORDER[2]]=b;
     bytes[FIELD_ORDER[3]]=c;
+    // Layer 34: Polymorphic IR — mutate non-opcode bytes with PC-derived key
+    var pc=instIdx+1;
+    var mutKey=((IMUT_SEED*pc+IMUT_MUL)&0xFFFFFF);
+    var keyBytes=[(mutKey)&0xFF,(mutKey>>8)&0xFF,(mutKey>>16)&0xFF];
+    var ki=0;
+    for(var fi=0;fi<4;fi++){
+      if(fi===FIELD_ORDER[0])continue;
+      bytes[fi]=(bytes[fi]^keyBytes[ki])&0xFF;
+      ki++;
+    }
     return bytes[0]|(bytes[1]<<8)|(bytes[2]<<16)|(bytes[3]<<24);
   });
   var codeStr='{'+encCode.join(',')+'}';
@@ -1499,7 +1509,7 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
   var kStr='{'+kParts.join(',')+'}';
   // Sub-prototypes
   var pParts=proto.p.map(function(sp,idx){
-    var subStr=bcSerializePrototype(sp,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD);
+    var subStr=bcSerializePrototype(sp,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD,IMUT_SEED,IMUT_MUL);
     var factoryStr='return function(_SS) return '+subStr+' end';
     var encBytes=encryptProtoString(factoryStr,idx,FENC_KEY,FENC_MUL,FENC_ADD);
     return luaByteLiteral(encBytes);
@@ -1523,7 +1533,7 @@ function encryptProtoString(plainStr,protoIdx,FENC_KEY,FENC_MUL,FENC_ADD){
 }
 
 // ─── BYTECODE VM GENERATOR ──────────────────────────────────────────────────
-function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr){
+function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr,imutSeedExpr,imutMulExpr){
   // Reuse name generator and encryption from tree-walking mode
   var _usedNames=new Set();
   function rn(){
@@ -1715,6 +1725,9 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
 
   // Setup
   lines.push('local _GENV=getgenv and getgenv() or _G');
+  // Layer 32: __tostring hijacking — poison string/number metatables
+  lines.push('pcall(function() local _mt=getmetatable("") if _mt then _mt.__tostring=nil end end)');
+  lines.push('pcall(function() local _mt=getmetatable(0) if _mt then _mt.__tostring=nil end end)');
   lines.push('local '+R.EKA+'={'+keyA.join(',')+'}');
   lines.push('local '+R.EKB+'={'+keyB.join(',')+'}');
   lines.push('local '+R.ES+'={'+encStrs.join(',')+'}');
@@ -1743,13 +1756,15 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  return rawget('+R.dI+','+R.dJ+')');
   lines.push('end})');
 
-  // OPDEC table
-  lines.push('local '+R.OPDEC+'={'+opdecEntries.join(',')+'}');
+  // OPDEC table — Layer 33: metatable dispatch (hidden table + __index wrapper)
+  var _hiddenName=rn();
+  lines.push('local '+_hiddenName+'={'+opdecEntries.join(',')+'}');
+  lines.push('local '+R.OPDEC+'=setmetatable({},{__index=function(_,_k) return '+_hiddenName+'[_k] end})');
 
-  // Layer C: OPDEC entry count check
-  lines.push('do local _n=0 for _ in pairs('+R.OPDEC+') do _n=_n+1 end');
+  // Layer C: OPDEC entry count check (iterates hidden table)
+  lines.push('do local _n=0 for _ in pairs('+_hiddenName+') do _n=_n+1 end');
   lines.push('if _n~='+opdecCount+' then');
-  lines.push('  for _k in pairs('+R.OPDEC+') do '+R.OPDEC+'[_k]=bit32.bxor('+R.OPDEC+'[_k],255) end');
+  lines.push('  for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]=bit32.bxor('+_hiddenName+'[_k],255) end');
   lines.push('end end');
 
   // Layer B: delayed verification init
@@ -1771,10 +1786,10 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('for '+R.tI+'=1,#'+R.EKB+' do');
   lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+R.EKB+'['+R.tI+']+1)%'+TMOD);
   lines.push('end');
-  lines.push('do local _ks={} for '+R.tI+' in pairs('+R.OPDEC+') do _ks[#_ks+1]='+R.tI+' end table.sort(_ks)');
+  lines.push('do local _ks={} for '+R.tI+' in pairs('+_hiddenName+') do _ks[#_ks+1]='+R.tI+' end table.sort(_ks)');
   lines.push('for _,'+R.tI+' in ipairs(_ks) do');
   lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+R.tI+'+1)%'+TMOD);
-  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+R.OPDEC+'['+R.tI+']+1)%'+TMOD);
+  lines.push('  '+R.tCk+'=('+R.tCk+'*'+TMUL+'+'+_hiddenName+'['+R.tI+']+1)%'+TMOD);
   lines.push('end end');
   lines.push('if '+R.tCk+'~='+_tChk+' then');
   lines.push('  for '+R.tI+'=1,#'+R.EKA+' do '+R.EKA+'['+R.tI+']=bit32.bxor('+R.EKA+'['+R.tI+'],171) end');
@@ -1796,6 +1811,11 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+_fkName+'='+fencKeyExpr);
   lines.push('local '+_fmName+'='+fencMulExpr);
   lines.push('local '+_faName+'='+fencAddExpr);
+
+  // Polymorphic IR keys (Layer 34)
+  var _imSeed=rn(),_imMul=rn();
+  lines.push('local '+_imSeed+'='+imutSeedExpr);
+  lines.push('local '+_imMul+'='+imutMulExpr);
 
   // Decode constants: lazy metatable with encrypted integers
   var _decK=rn();
@@ -1861,14 +1881,31 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  while true do');
   lines.push('    local '+R.inst+'='+R.code+'['+R.pc+']');
   lines.push('    '+R.pc+'='+R.pc+'+1');
+  // Layer 34: Polymorphic IR — unmutate instruction operands
+  var _imK=rn();
+  lines.push('    local '+_imK+'=bit32.band('+_imSeed+'*('+R.pc+'-1)+'+_imMul+',16777215)');
+  // Build XOR mask: place 3 key bytes at the 3 non-opcode byte positions
+  var opBytePos=FIELD_ORDER[0];
+  var nonOp=[0,1,2,3].filter(function(p){return p!==opBytePos;}).sort(function(a,b){return a-b;});
+  var multipliers=[1,256,65536,16777216];
+  var keyExtract=[
+    _imK+'%256',
+    'math.floor('+_imK+'/256)%256',
+    'math.floor('+_imK+'/65536)%256'
+  ];
+  var maskTerms=nonOp.map(function(pos,i){
+    if(multipliers[pos]===1)return keyExtract[i];
+    return keyExtract[i]+'*'+multipliers[pos];
+  });
+  lines.push('    '+R.inst+'=bit32.bxor('+R.inst+','+maskTerms.join('+')+')');
   // Layer B: delayed OPDEC verification after 500 instructions
   lines.push('    '+R.tCnt+'='+R.tCnt+'+1');
   lines.push('    if '+R.tCnt+'==500 then');
   lines.push('      local _c2='+TSEED2);
-  lines.push('      local _ks={} for _k in pairs('+R.OPDEC+') do _ks[#_ks+1]=_k end table.sort(_ks)');
+  lines.push('      local _ks={} for _k in pairs('+_hiddenName+') do _ks[#_ks+1]=_k end table.sort(_ks)');
   lines.push('      for _,_k in ipairs(_ks) do _c2=(_c2*'+TMUL2+'+_k+1)%'+TMOD_B+' end');
   lines.push('      if _c2~=bit32.bxor('+R.tExp2+','+MASK2+') then');
-  lines.push('        for _k in pairs('+R.OPDEC+') do '+R.OPDEC+'[_k]='+R.OPDEC+'[_k]+1 end');
+  lines.push('        for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]='+_hiddenName+'[_k]+1 end');
   lines.push('      end');
   lines.push('    end');
   lines.push('    local '+R.op+'='+R.OPDEC+'[bit32.bxor('+fieldExpr(R.inst,0)+','+AOXR+')]');
@@ -2354,7 +2391,10 @@ function obfuscateBytecodeVM(src){
   var FENC_KEY=Math.floor(Math.random()*0xFFFFFF)+1;
   var FENC_MUL=Math.floor(Math.random()*900)+100;
   var FENC_ADD=Math.floor(Math.random()*254)+1;
-  var protoStr=bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD);
+  // Polymorphic IR keys (Layer 34)
+  var IMUT_SEED=Math.floor(Math.random()*0xFFFFFF)+1;
+  var IMUT_MUL=Math.floor(Math.random()*900)+100;
+  var protoStr=bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD,IMUT_SEED,IMUT_MUL);
   var kEncKeyExpr=encNum(KENC_KEY);
   var kEncMulExpr=encNum(KENC_MUL);
   var fencKeyExpr=encNum(FENC_KEY);
@@ -2374,7 +2414,9 @@ function obfuscateBytecodeVM(src){
     var k;do{k=Math.floor(Math.random()*200)+1;}while(usedRTKeys.has(k));
     usedRTKeys.add(k);rtKeys[STDLIB[si]]=k;
   }
-  return generateBytecodeVM(OPMAP,protoStr,_strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr);
+  var imutSeedExpr=encNum(IMUT_SEED);
+  var imutMulExpr=encNum(IMUT_MUL);
+  return generateBytecodeVM(OPMAP,protoStr,_strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr,imutSeedExpr,imutMulExpr);
 }
 </script>
 </body>
