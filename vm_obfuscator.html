@@ -513,9 +513,10 @@ var BC={
   SETLIST:36,CLOSURE:37,VARARG:38,
   BAND:39,BOR:40,BXOR:41,SHL:42,SHR:43,BNOT:44,
   NOP:45,CLOSE:46,
-  SUPER_MRET:47,SUPER_KRET:48,SUPER_GCALL:49
+  SUPER_MRET:47,SUPER_KRET:48,SUPER_GCALL:49,
+  SUPER_SELF_CALL:50,SUPER_TEST_JMP:51,SUPER_GETTAB_CALL:52
 };
-var BC_COUNT=50;
+var BC_COUNT=53;
 var GARBAGE_OP=255;
 
 function bcEncode(op,a,b,c){return(op&0xFF)|((a&0xFF)<<8)|((b&0xFF)<<16)|((c&0xFF)<<24);}
@@ -1319,10 +1320,29 @@ function fuseInstructions(proto){
       }
     }
   }
+  // Build jump-target set for TEST+JMP fusion guard
+  var isJumpTarget=new Set();
+  for(var jtpc=0;jtpc<len;jtpc++){
+    var jtInst=code[jtpc],jtOp=jtInst&0xFF;
+    for(var ji2=0;ji2<jumpOps.length;ji2++){
+      if(jtOp===jumpOps[ji2]){
+        var jtSbx=((jtInst>>16)&0xFFFF)-32767;
+        var jtTarget=jtpc+1+jtSbx;
+        if(jtTarget>=0&&jtTarget<=len)isJumpTarget.add(jtTarget);
+        break;
+      }
+    }
+  }
   // First pass: determine which pairs can be fused
   var fuseAt=new Set();
   var pc=0;
   while(pc<len){
+    // Special: TEST+JMP (both skip-next protected, check before protectedFuse)
+    if(pc+1<len&&!isJumpTarget.has(pc)&&!isJumpTarget.has(pc+1)){
+      var inst=code[pc],inst2=code[pc+1];
+      var op=inst&0xFF,op2=inst2&0xFF;
+      if(op===BC.TEST&&op2===BC.JMP){fuseAt.add(pc);pc+=2;continue;}
+    }
     if(protectedFuse.has(pc)){pc++;continue;}
     if(pc+1<len&&!protectedFuse.has(pc+1)){
       var inst=code[pc],inst2=code[pc+1];
@@ -1331,6 +1351,8 @@ function fuseInstructions(proto){
       if(op===BC.MOVE&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
       if(op===BC.LOADK&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
       if(op===BC.GETGLOBAL&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
+      if(op===BC.SELF&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
+      if(op===BC.GETTABLE&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
     }
     pc++;
   }
@@ -1343,7 +1365,7 @@ function fuseInstructions(proto){
     oldToNew[pc]=newPc;
     if(fuseAt.has(pc)){
       var op=(code[pc]&0xFF);
-      if(op===BC.GETGLOBAL) newPc+=2; else newPc+=1;
+      if(op===BC.GETGLOBAL||op===BC.SELF||op===BC.GETTABLE||op===BC.TEST) newPc+=2; else newPc+=1;
       oldToNew[pc+1]=newPc; // second instruction maps to after the fused output
       pc+=2;
     }else{
@@ -1364,10 +1386,24 @@ function fuseInstructions(proto){
       }else if(op===BC.LOADK){
         var bx=(inst>>16)&0xFFFF;
         newCode.push(bcEncode(BC.SUPER_KRET,a,bx&0xFF,(bx>>8)&0xFF));
-      }else{ // GETGLOBAL+CALL
+      }else if(op===BC.GETGLOBAL){ // GETGLOBAL+CALL
         var bx2=(inst>>16)&0xFFFF;
         newCode.push(bcEncode(BC.SUPER_GCALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
         newCode.push(bcEncode(0,0,bx2&0xFF,(bx2>>8)&0xFF));
+      }else if(op===BC.SELF){ // SELF+CALL → SUPER_SELF_CALL
+        newCode.push(bcEncode(BC.SUPER_SELF_CALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
+        newCode.push(bcEncode(0,0,(inst>>16)&0xFF,(inst>>24)&0xFF));
+      }else if(op===BC.GETTABLE){ // GETTABLE+CALL → SUPER_GETTAB_CALL
+        newCode.push(bcEncode(BC.SUPER_GETTAB_CALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
+        newCode.push(bcEncode(0,0,(inst>>16)&0xFF,(inst>>24)&0xFF));
+      }else if(op===BC.TEST){ // TEST+JMP → SUPER_TEST_JMP
+        var testC=(inst>>24)&0xFF;
+        newCode.push(bcEncode(BC.SUPER_TEST_JMP,a,testC,0));
+        var oldSbx=((inst2>>16)&0xFFFF)-32767;
+        var oldTarget=(pc+1)+1+oldSbx;
+        var secondWordNewPos=newCode.length;
+        var newSbx=oldToNew[oldTarget]-(secondWordNewPos+1);
+        newCode.push(bcEncodesBx(0,0,newSbx));
       }
       pc+=2;
     }else{
@@ -1406,7 +1442,7 @@ function injectGarbage(proto){
     if(op===BC.LOADBOOL&&((inst>>24)&0xFF)!==0){
       protectedPos.add(pc+1);
     }
-    if(op===BC.SUPER_GCALL){
+    if(op===BC.SUPER_GCALL||op===BC.SUPER_SELF_CALL||op===BC.SUPER_TEST_JMP||op===BC.SUPER_GETTAB_CALL){
       protectedPos.add(pc+1);
     }
   }
@@ -1491,6 +1527,14 @@ function injectGarbage(proto){
         break;
       }
     }
+    // Fix SUPER_TEST_JMP embedded JMP sBx in second word
+    if(op===BC.SUPER_TEST_JMP&&pc+1<codeLen){
+      var dw=proto.code[pc+1];
+      var dwSbx=((dw>>16)&0xFFFF)-32767;
+      var dwOldTarget=(pc+1)+1+dwSbx;
+      var dwNewSbx=newPC(dwOldTarget)-newPC(pc+1)-1;
+      proto.code[pc+1]=bcEncodesBx(0,0,dwNewSbx);
+    }
   }
   // Build new code array with insertions spliced in
   var newCode=[];
@@ -1519,11 +1563,14 @@ function scrambleCode(proto){
   var code=proto.code;
   var len=code.length;
   if(len<1){proto.startPC=1;proto.succ={};return;}
-  // Build blocks: SUPER_GCALL is 2-word atomic, everything else is 1-word
+  // Build blocks: 2-word superops are atomic, everything else is 1-word
+  var twoWordOps=[BC.SUPER_GCALL,BC.SUPER_SELF_CALL,BC.SUPER_TEST_JMP,BC.SUPER_GETTAB_CALL];
   var blocks=[];
   var pc=0;
   while(pc<len){
-    if((code[pc]&0xFF)===BC.SUPER_GCALL){blocks.push({start:pc,len:2});pc+=2;}
+    var bop=code[pc]&0xFF,isTwo=false;
+    for(var tw=0;tw<twoWordOps.length;tw++){if(bop===twoWordOps[tw]){isTwo=true;break;}}
+    if(isTwo){blocks.push({start:pc,len:2});pc+=2;}
     else{blocks.push({start:pc,len:1});pc++;}
   }
   // Convert all jump instructions from relative sBx to absolute Bx
@@ -1538,6 +1585,13 @@ function scrambleCode(proto){
         code[i]=bcEncodeBx(op,a,oldTarget);
         break;
       }
+    }
+    // SUPER_TEST_JMP second word contains embedded JMP sBx
+    if(op===BC.SUPER_TEST_JMP&&i+1<len){
+      var dw=code[i+1];
+      var dwSbx=((dw>>16)&0xFFFF)-32767;
+      var dwTarget=((i+1)+1)+1+dwSbx;
+      code[i+1]=bcEncodeBx(0,0,dwTarget);
     }
   }
   // Set identity successor table and startPC (default for short protos)
@@ -1565,6 +1619,11 @@ function scrambleCode(proto){
         code[i]=bcEncodeBx(op,a,oldToNew[(inst>>16)&0xFFFF]);
         break;
       }
+    }
+    // Remap SUPER_TEST_JMP second word absolute target
+    if(op===BC.SUPER_TEST_JMP&&i+1<len){
+      var dw=code[i+1];
+      code[i+1]=bcEncodeBx(0,0,oldToNew[(dw>>16)&0xFFFF]);
     }
   }
   // Build execution-order block list (sorted by original position)
@@ -1638,6 +1697,11 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
     if(jop===BC.JMP||jop===BC.FORLOOP||jop===BC.FORPREP||jop===BC.TFORLOOP){
       var jBx=(jinst>>16)&0xFFFF; // Layer 54: absolute target
       if(jBx>=1&&jBx<=proto.code.length)jumpTargets[jBx]=true;
+    }
+    if(jop===BC.SUPER_TEST_JMP&&ji+1<proto.code.length){
+      var dwInst=proto.code[ji+1];
+      var dwBx=(dwInst>>16)&0xFFFF;
+      if(dwBx>=1&&dwBx<=proto.code.length)jumpTargets[dwBx]=true;
     }
     if(jop===BC.EQ||jop===BC.LT||jop===BC.LE||jop===BC.TEST||jop===BC.TESTSET){
       var _s1=proto.succ[jpc];
@@ -2605,6 +2669,66 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   ].concat(sgImut).concat([
     '      local _bx='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
     '      local _fn=_GENV['+R.K+'[_bx+1]]',
+    '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
+    '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
+    '      local _as={}',
+    '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
+    '      local _rv=table.pack(pcall(_fn,table.unpack(_as,1,_na)))',
+    '      if not _rv[1] then error(_rv[2],0) end',
+    '      if _c==0 then',
+    '        for _i=2,_rv.n do '+_rset+'('+R.REG+','+R.a+'+_i-2,_rv[_i]) end',
+    '        '+R.top+'='+R.a+'+_rv.n-2',
+    '      else',
+    '        for _i=1,_c-1 do '+_rset+'('+R.REG+','+R.a+'+_i-1,_rv[_i+1]) end',
+    '      end'
+  ])});
+
+  // SUPER_SELF_CALL: SELF + CALL fused
+  var ssImut=genImutUnmask('_dw');
+  handlers.push({cond:R.op+'=='+BC.SUPER_SELF_CALL,body:[
+    '      local _dw='+R.code+'['+R.pc+']',
+    '      '+R.pc+'='+_succVar+'['+R.pc+']',
+  ].concat(ssImut).concat([
+    '      local _sb='+fieldExpr('_dw',2),
+    '      local _sc='+fieldExpr('_dw',3),
+    '      local _obj='+_rget+'('+R.REG+',_sb)',
+    '      '+_rset+'('+R.REG+','+R.a+'+1,_obj)',
+    '      local _fn=_obj['+R.RK+'('+R.REG+','+R.K+',_sc)]',
+    '      '+_rset+'('+R.REG+','+R.a+',_fn)',
+    '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
+    '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
+    '      local _as={}',
+    '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
+    '      local _rv=table.pack(pcall(_fn,table.unpack(_as,1,_na)))',
+    '      if not _rv[1] then error(_rv[2],0) end',
+    '      if _c==0 then',
+    '        for _i=2,_rv.n do '+_rset+'('+R.REG+','+R.a+'+_i-2,_rv[_i]) end',
+    '        '+R.top+'='+R.a+'+_rv.n-2',
+    '      else',
+    '        for _i=1,_c-1 do '+_rset+'('+R.REG+','+R.a+'+_i-1,_rv[_i+1]) end',
+    '      end'
+  ])});
+  // SUPER_TEST_JMP: TEST + JMP fused
+  var stImut=genImutUnmask('_dw');
+  handlers.push({cond:R.op+'=='+BC.SUPER_TEST_JMP,body:[
+    '      local _dw='+R.code+'['+R.pc+']',
+    '      '+R.pc+'='+_succVar+'['+R.pc+']',
+  ].concat(stImut).concat([
+    '      local _c='+fieldExpr(R.inst,2),
+    '      if(not '+_rget+'('+R.REG+','+R.a+'))~=(_c~=0) then',
+    '        '+R.pc+'='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
+    '      end'
+  ])});
+  // SUPER_GETTAB_CALL: GETTABLE + CALL fused
+  var sgcImut=genImutUnmask('_dw');
+  handlers.push({cond:R.op+'=='+BC.SUPER_GETTAB_CALL,body:[
+    '      local _dw='+R.code+'['+R.pc+']',
+    '      '+R.pc+'='+_succVar+'['+R.pc+']',
+  ].concat(sgcImut).concat([
+    '      local _gb='+fieldExpr('_dw',2),
+    '      local _gc='+fieldExpr('_dw',3),
+    '      local _fn='+_rget+'('+R.REG+',_gb)['+R.RK+'('+R.REG+','+R.K+',_gc)]',
+    '      '+_rset+'('+R.REG+','+R.a+',_fn)',
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
     '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
     '      local _as={}',
