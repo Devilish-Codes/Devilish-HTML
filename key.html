@@ -117,6 +117,51 @@
   }
   .extend-row { display: flex; gap: 8px; }
   .extend-row .btn { flex: 1; }
+
+  /* Checkpoint progress */
+  .progress-wrap {
+    background: #0d0420;
+    border: 1px solid #301060;
+    border-radius: 8px;
+    height: 28px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-bar {
+    height: 100%;
+    border-radius: 7px;
+    transition: width 0.6s ease;
+    background: linear-gradient(90deg, #5a15a0, #20a048);
+  }
+  .progress-text {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  .checkpoint-msg {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    padding: 12px;
+    border-radius: 8px;
+  }
+  .checkpoint-msg.partial {
+    background: #1a1a00;
+    border: 1px solid #6a6a00;
+    color: #e0d060;
+  }
+  .checkpoint-msg.done {
+    background: #0a200a;
+    border: 1px solid #20a040;
+    color: #60e060;
+  }
+  #cp2Section { display: none; }
 </style>
 </head>
 <body>
@@ -132,18 +177,38 @@
 
   <button class="btn btn-copy" id="btnCopy" disabled>Copy Key</button>
 
-  <hr>
-  <div class="section-label">Get a New Key</div>
+  <!-- Checkpoint progress (hidden until checkpoint flow starts) -->
+  <div id="cpProgress" style="display:none">
+    <hr>
+    <div class="progress-wrap">
+      <div class="progress-bar" id="cpBar" style="width:0%"></div>
+      <div class="progress-text" id="cpBarText">Checkpoint 0/2</div>
+    </div>
+    <div class="checkpoint-msg partial" id="cpMsg" style="display:none"></div>
+  </div>
 
-  <button class="btn btn-lootlabs" id="btnLootlabs">Get Key via Loot Labs</button>
-  <button class="btn btn-linkvertise" id="btnLinkvertise">Get Key via Linkvertise</button>
+  <!-- Checkpoint 2 buttons (shown after checkpoint 1) -->
+  <div id="cp2Section">
+    <div class="section-label">Complete Checkpoint 2</div>
+    <button class="btn btn-lootlabs" id="btnCp2Loot">Continue via Loot Labs</button>
+    <button class="btn btn-linkvertise" id="btnCp2Link">Continue via Linkvertise</button>
+  </div>
 
-  <hr>
-  <div class="section-label">Extend Existing Key (+6 hours)</div>
+  <!-- Initial get key buttons -->
+  <div id="getKeySection">
+    <hr>
+    <div class="section-label">Get a New Key</div>
+    <button class="btn btn-lootlabs" id="btnLootlabs">Get Key via Loot Labs</button>
+    <button class="btn btn-linkvertise" id="btnLinkvertise">Get Key via Linkvertise</button>
+  </div>
 
-  <div class="extend-row">
-    <button class="btn btn-extend" id="btnExtLoot" disabled>Loot Labs</button>
-    <button class="btn btn-extend" id="btnExtLink" disabled>Linkvertise</button>
+  <div id="extendSection">
+    <hr>
+    <div class="section-label">Extend Existing Key (+6 hours)</div>
+    <div class="extend-row">
+      <button class="btn btn-extend" id="btnExtLoot" disabled>Loot Labs</button>
+      <button class="btn btn-extend" id="btnExtLink" disabled>Linkvertise</button>
+    </div>
   </div>
 
   <div class="status waiting" id="status">Waiting...</div>
@@ -151,14 +216,17 @@
 </div>
 
 <script>
-// ── PLACEHOLDER: Replace with your deployed Cloudflare Worker URL ──
 const WORKER = "https://devilish-keys.devilish-codes.workers.dev";
+
+const LOOTLABS_URL = "https://lootdest.org/s?FvzGY6FE";
+const LINKVERTISE_URL = "https://link-hub.net/2037098/Gt1GKVp0MwNt";
 
 const params = new URLSearchParams(location.search);
 const userId = params.get("userId") || "";
 const service = params.get("service") || "";
 const isExtend = params.get("extend") === "1";
 const extendKey = params.get("key") || "";
+const isCompleted = params.get("completed") === "1";
 
 const $ = (id) => document.getElementById(id);
 let currentKey = extendKey || "";
@@ -179,17 +247,25 @@ function showKey(key, expiresAt) {
   $("btnCopy").disabled = false;
   $("btnExtLoot").disabled = false;
   $("btnExtLink").disabled = false;
+  $("getKeySection").style.display = "none";
+  $("cp2Section").style.display = "none";
   if (expiresAt) {
     const dt = new Date(expiresAt * 1000);
     $("expires").textContent = "Expires: " + dt.toLocaleString();
   }
 }
 
+function updateProgress(count) {
+  $("cpProgress").style.display = "block";
+  const pct = (count / 2) * 100;
+  $("cpBar").style.width = pct + "%";
+  $("cpBarText").textContent = "Checkpoint " + count + "/2";
+}
+
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).then(
     () => setStatus("Copied to clipboard!", "success"),
     () => {
-      // Fallback
       const ta = document.createElement("textarea");
       ta.value = text;
       document.body.appendChild(ta);
@@ -199,6 +275,11 @@ function copyToClipboard(text) {
       setStatus("Copied to clipboard!", "success");
     }
   );
+}
+
+function getCheckpointUrl(svc) {
+  if (svc === "lootlabs") return LOOTLABS_URL;
+  return LINKVERTISE_URL;
 }
 
 async function startSession(svc, extend = false) {
@@ -229,33 +310,70 @@ async function startSession(svc, extend = false) {
     }
 
     currentSession = data.session;
-    try { localStorage.setItem("dvls_session", data.session); } catch (_) {}
-    window.open(data.checkpointUrl, "_blank");
-    setStatus("Complete the checkpoint in the new tab, then wait...", "polling");
+    try {
+      localStorage.setItem("dvls_session", data.session);
+      localStorage.setItem("dvls_checkpoint", "0");
+    } catch (_) {}
 
-    pollTimer = setInterval(async () => {
-      try {
-        const pr = await fetch(WORKER + "/api/poll?session=" + currentSession);
-        const pd = await pr.json();
-        if (pd.completed && pd.key) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-          showKey(pd.key);
-          setStatus(extend ? "Key extended! +6 hours" : "Key obtained!", "success");
-          // Fetch full expiry from validate
-          try {
-            const vr = await fetch(WORKER + "/api/validate?key=" + pd.key + "&userId=" + userId);
-            const vd = await vr.json();
-            if (vd.expiresAt) {
-              const dt = new Date(vd.expiresAt * 1000);
-              $("expires").textContent = "Expires: " + dt.toLocaleString();
-            }
-          } catch (_) {}
-        }
-      } catch (_) {}
-    }, 3000);
+    if (extend) {
+      // Extend = single checkpoint, no dual gate
+      window.open(data.checkpointUrl, "_blank");
+      setStatus("Complete the checkpoint in the new tab, then wait...", "polling");
+      pollTimer = setInterval(async () => {
+        try {
+          const pr = await fetch(WORKER + "/api/poll?session=" + currentSession);
+          const pd = await pr.json();
+          if (pd.completed && pd.key) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            showKey(pd.key);
+            setStatus("Key extended! +6 hours", "success");
+            try {
+              const vr = await fetch(WORKER + "/api/validate?key=" + pd.key + "&userId=" + userId);
+              const vd = await vr.json();
+              if (vd.expiresAt) $("expires").textContent = "Expires: " + new Date(vd.expiresAt * 1000).toLocaleString();
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }, 3000);
+    } else {
+      // New key = dual checkpoint
+      updateProgress(0);
+      $("getKeySection").style.display = "none";
+      window.location.href = data.checkpointUrl;
+    }
   } catch (err) {
     setStatus("Network error: " + err.message, "error");
+  }
+}
+
+function startCheckpoint2(svc) {
+  try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
+  window.location.href = getCheckpointUrl(svc);
+}
+
+async function completeSession(sess) {
+  setStatus("Generating key...", "polling");
+  try {
+    const r = await fetch(WORKER + "/api/postback?session=" + sess);
+    const d = await r.json();
+    if (d.ok && d.key) {
+      try {
+        localStorage.removeItem("dvls_session");
+        localStorage.removeItem("dvls_checkpoint");
+      } catch (_) {}
+      updateProgress(2);
+      const msg = $("cpMsg");
+      msg.style.display = "block";
+      msg.className = "checkpoint-msg done";
+      msg.textContent = "Checkpoint 2/2 Completed!";
+      showKey(d.key, d.expiresAt);
+      setStatus("Key obtained! Copy it and paste in-game.", "success");
+    } else {
+      setStatus("Error: " + (d.error || "session not found"), "error");
+    }
+  } catch (e) {
+    setStatus("Network error: " + e.message, "error");
   }
 }
 
@@ -268,29 +386,41 @@ $("btnLinkvertise").addEventListener("click", () => startSession("linkvertise"))
 $("btnExtLoot").addEventListener("click", () => startSession("lootlabs", true));
 $("btnExtLink").addEventListener("click", () => startSession("linkvertise", true));
 
-// ── Handle return from Linkvertise (no server-side postback) ──
-const isCompleted = params.get("completed") === "1";
+$("btnCp2Loot").addEventListener("click", () => startCheckpoint2("lootlabs"));
+$("btnCp2Link").addEventListener("click", () => startCheckpoint2("linkvertise"));
+
+// ── Handle checkpoint returns ──
 if (isCompleted) {
   (async () => {
     let sess = null;
-    try { sess = localStorage.getItem("dvls_session"); } catch (_) {}
-    if (sess) {
-      setStatus("Verifying completion...", "polling");
-      try {
-        const r = await fetch(WORKER + "/api/postback?session=" + sess);
-        const d = await r.json();
-        if (d.ok && d.key) {
-          try { localStorage.removeItem("dvls_session"); } catch (_) {}
-          showKey(d.key, d.expiresAt);
-          setStatus(d.expiresAt ? "Key extended! +6 hours" : "Key obtained!", "success");
-        } else {
-          setStatus("Error: " + (d.error || "session not found"), "error");
-        }
-      } catch (e) {
-        setStatus("Network error: " + e.message, "error");
-      }
-    } else {
+    let cp = 0;
+    try {
+      sess = localStorage.getItem("dvls_session");
+      cp = parseInt(localStorage.getItem("dvls_checkpoint") || "0");
+    } catch (_) {}
+
+    if (!sess) {
       setStatus("No active session found. Try again from in-game.", "error");
+      return;
+    }
+
+    if (cp < 1) {
+      // Checkpoint 1 done
+      try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
+      updateProgress(1);
+      const msg = $("cpMsg");
+      msg.style.display = "block";
+      msg.className = "checkpoint-msg partial";
+      msg.textContent = "Checkpoint 1/2 Completed!";
+      $("getKeySection").style.display = "none";
+      $("cp2Section").style.display = "block";
+      setStatus("Complete one more checkpoint to get your key.", "polling");
+    } else {
+      // Checkpoint 2 done
+      updateProgress(2);
+      $("getKeySection").style.display = "none";
+      $("cp2Section").style.display = "none";
+      await completeSession(sess);
     }
   })();
 } else if (userId && service && !isExtend) {
