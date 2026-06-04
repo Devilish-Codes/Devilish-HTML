@@ -409,8 +409,8 @@ if (completedStep > 0) {
       return;
     }
 
-    // Extend = always single checkpoint, regardless of service
-    if (isExtendSession) {
+    // Extend = completedStep 3, or localStorage flag
+    if (completedStep === 3 || isExtendSession) {
       $("getKeySection").style.display = "none";
       $("extendSection").style.display = "none";
       await completeExtendSession(sess);
