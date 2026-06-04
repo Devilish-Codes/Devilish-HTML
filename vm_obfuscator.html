@@ -513,10 +513,9 @@ var BC={
   SETLIST:36,CLOSURE:37,VARARG:38,
   BAND:39,BOR:40,BXOR:41,SHL:42,SHR:43,BNOT:44,
   NOP:45,CLOSE:46,
-  SUPER_MRET:47,SUPER_KRET:48,SUPER_GCALL:49,
-  SUPER_SELF_CALL:50,SUPER_TEST_JMP:51,SUPER_GETTAB_CALL:52
+  SUPER_MRET:47,SUPER_KRET:48,SUPER_GCALL:49
 };
-var BC_COUNT=53;
+var BC_COUNT=50;
 var GARBAGE_OP=255;
 
 function bcEncode(op,a,b,c){return(op&0xFF)|((a&0xFF)<<8)|((b&0xFF)<<16)|((c&0xFF)<<24);}
@@ -1291,8 +1290,8 @@ function bcCompileTopLevel(ast){
   return proto;
 }
 
-// ─── GARBAGE BYTECODE INJECTION ──────────────────────────────────────────────
-// ─── SUPEROPERATOR FUSION ────────────────────────────────────────────────────
+// ─── Layer 38 : Instruction Fusion (Superoperators) ─────────────────────────
+// Fuses MOVE+RETURN → SUPER_MRET, LOADK+RETURN → SUPER_KRET, GETGLOBAL+CALL → SUPER_GCALL (2-word)
 function fuseInstructions(proto){
   for(var i=0;i<proto.p.length;i++) fuseInstructions(proto.p[i]);
   var code=proto.code;
@@ -1320,29 +1319,10 @@ function fuseInstructions(proto){
       }
     }
   }
-  // Build jump-target set for TEST+JMP fusion guard
-  var isJumpTarget=new Set();
-  for(var jtpc=0;jtpc<len;jtpc++){
-    var jtInst=code[jtpc],jtOp=jtInst&0xFF;
-    for(var ji2=0;ji2<jumpOps.length;ji2++){
-      if(jtOp===jumpOps[ji2]){
-        var jtSbx=((jtInst>>16)&0xFFFF)-32767;
-        var jtTarget=jtpc+1+jtSbx;
-        if(jtTarget>=0&&jtTarget<=len)isJumpTarget.add(jtTarget);
-        break;
-      }
-    }
-  }
   // First pass: determine which pairs can be fused
   var fuseAt=new Set();
   var pc=0;
   while(pc<len){
-    // Special: TEST+JMP (both skip-next protected, check before protectedFuse)
-    if(pc+1<len&&!isJumpTarget.has(pc)&&!isJumpTarget.has(pc+1)){
-      var inst=code[pc],inst2=code[pc+1];
-      var op=inst&0xFF,op2=inst2&0xFF;
-      if(op===BC.TEST&&op2===BC.JMP){fuseAt.add(pc);pc+=2;continue;}
-    }
     if(protectedFuse.has(pc)){pc++;continue;}
     if(pc+1<len&&!protectedFuse.has(pc+1)){
       var inst=code[pc],inst2=code[pc+1];
@@ -1351,8 +1331,6 @@ function fuseInstructions(proto){
       if(op===BC.MOVE&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
       if(op===BC.LOADK&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
       if(op===BC.GETGLOBAL&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
-      if(op===BC.SELF&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
-      if(op===BC.GETTABLE&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
     }
     pc++;
   }
@@ -1365,7 +1343,7 @@ function fuseInstructions(proto){
     oldToNew[pc]=newPc;
     if(fuseAt.has(pc)){
       var op=(code[pc]&0xFF);
-      if(op===BC.GETGLOBAL||op===BC.SELF||op===BC.GETTABLE||op===BC.TEST) newPc+=2; else newPc+=1;
+      if(op===BC.GETGLOBAL) newPc+=2; else newPc+=1;
       oldToNew[pc+1]=newPc; // second instruction maps to after the fused output
       pc+=2;
     }else{
@@ -1386,24 +1364,10 @@ function fuseInstructions(proto){
       }else if(op===BC.LOADK){
         var bx=(inst>>16)&0xFFFF;
         newCode.push(bcEncode(BC.SUPER_KRET,a,bx&0xFF,(bx>>8)&0xFF));
-      }else if(op===BC.GETGLOBAL){ // GETGLOBAL+CALL
+      }else{ // GETGLOBAL+CALL
         var bx2=(inst>>16)&0xFFFF;
         newCode.push(bcEncode(BC.SUPER_GCALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
         newCode.push(bcEncode(0,0,bx2&0xFF,(bx2>>8)&0xFF));
-      }else if(op===BC.SELF){ // SELF+CALL → SUPER_SELF_CALL
-        newCode.push(bcEncode(BC.SUPER_SELF_CALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
-        newCode.push(bcEncode(0,0,(inst>>16)&0xFF,(inst>>24)&0xFF));
-      }else if(op===BC.GETTABLE){ // GETTABLE+CALL → SUPER_GETTAB_CALL
-        newCode.push(bcEncode(BC.SUPER_GETTAB_CALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
-        newCode.push(bcEncode(0,0,(inst>>16)&0xFF,(inst>>24)&0xFF));
-      }else if(op===BC.TEST){ // TEST+JMP → SUPER_TEST_JMP
-        var testC=(inst>>24)&0xFF;
-        newCode.push(bcEncode(BC.SUPER_TEST_JMP,a,testC,0));
-        var oldSbx=((inst2>>16)&0xFFFF)-32767;
-        var oldTarget=(pc+1)+1+oldSbx;
-        var secondWordNewPos=newCode.length;
-        var newSbx=oldToNew[oldTarget]-(secondWordNewPos+1);
-        newCode.push(bcEncodesBx(0,0,newSbx));
       }
       pc+=2;
     }else{
@@ -1427,6 +1391,9 @@ function fuseInstructions(proto){
   proto.code=newCode;
 }
 
+// ─── Layer 9 : Garbage Bytecode Injection ───────────────────────────────────
+// Layer 10 : Opaque Conditional Branches (LOADBOOL+TEST+JMP always-taken patterns inside)
+// Inserts ~18% dead instructions: opaque conditionals, JMP-over blocks, single NOPs
 function injectGarbage(proto){
   for(var i=0;i<proto.p.length;i++) injectGarbage(proto.p[i]);
   var codeLen=proto.code.length;
@@ -1442,7 +1409,7 @@ function injectGarbage(proto){
     if(op===BC.LOADBOOL&&((inst>>24)&0xFF)!==0){
       protectedPos.add(pc+1);
     }
-    if(op===BC.SUPER_GCALL||op===BC.SUPER_SELF_CALL||op===BC.SUPER_TEST_JMP||op===BC.SUPER_GETTAB_CALL){
+    if(op===BC.SUPER_GCALL){
       protectedPos.add(pc+1);
     }
   }
@@ -1527,14 +1494,6 @@ function injectGarbage(proto){
         break;
       }
     }
-    // Fix SUPER_TEST_JMP embedded JMP sBx in second word
-    if(op===BC.SUPER_TEST_JMP&&pc+1<codeLen){
-      var dw=proto.code[pc+1];
-      var dwSbx=((dw>>16)&0xFFFF)-32767;
-      var dwOldTarget=(pc+1)+1+dwSbx;
-      var dwNewSbx=newPC(dwOldTarget)-newPC(pc+1)-1;
-      proto.code[pc+1]=bcEncodesBx(0,0,dwNewSbx);
-    }
   }
   // Build new code array with insertions spliced in
   var newCode=[];
@@ -1557,100 +1516,13 @@ function injectGarbage(proto){
   proto.code=newCode;
 }
 
-// ─── CONTROL FLOW FLATTENING (Layer 54) ─────────────────────────────────────
-function scrambleCode(proto){
-  for(var i=0;i<proto.p.length;i++) scrambleCode(proto.p[i]);
-  var code=proto.code;
-  var len=code.length;
-  if(len<1){proto.startPC=1;proto.succ={};return;}
-  // Build blocks: 2-word superops are atomic, everything else is 1-word
-  var twoWordOps=[BC.SUPER_GCALL,BC.SUPER_SELF_CALL,BC.SUPER_TEST_JMP,BC.SUPER_GETTAB_CALL];
-  var blocks=[];
-  var pc=0;
-  while(pc<len){
-    var bop=code[pc]&0xFF,isTwo=false;
-    for(var tw=0;tw<twoWordOps.length;tw++){if(bop===twoWordOps[tw]){isTwo=true;break;}}
-    if(isTwo){blocks.push({start:pc,len:2});pc+=2;}
-    else{blocks.push({start:pc,len:1});pc++;}
-  }
-  // Convert all jump instructions from relative sBx to absolute Bx
-  var jumpOps=[BC.JMP,BC.FORLOOP,BC.FORPREP,BC.TFORLOOP];
-  for(var i=0;i<len;i++){
-    var inst=code[i],op=inst&0xFF;
-    for(var ji=0;ji<jumpOps.length;ji++){
-      if(op===jumpOps[ji]){
-        var a=(inst>>8)&0xFF;
-        var sbx=((inst>>16)&0xFFFF)-32767;
-        var oldTarget=(i+1)+1+sbx;
-        code[i]=bcEncodeBx(op,a,oldTarget);
-        break;
-      }
-    }
-    // SUPER_TEST_JMP second word contains embedded JMP sBx
-    if(op===BC.SUPER_TEST_JMP&&i+1<len){
-      var dw=code[i+1];
-      var dwSbx=((dw>>16)&0xFFFF)-32767;
-      var dwTarget=((i+1)+1)+1+dwSbx;
-      code[i+1]=bcEncodeBx(0,0,dwTarget);
-    }
-  }
-  // Set identity successor table and startPC (default for short protos)
-  proto.startPC=1;
-  proto.succ={};
-  for(var i=1;i<len;i++) proto.succ[i]=i+1;
-  if(blocks.length<4) return;
-  // Fisher-Yates shuffle blocks
-  for(var i=blocks.length-1;i>0;i--){
-    var j=Math.floor(Math.random()*(i+1));
-    var tmp=blocks[i];blocks[i]=blocks[j];blocks[j]=tmp;
-  }
-  // Build old→new PC mapping (1-based)
-  var oldToNew={};
-  var newPos=1;
-  for(var i=0;i<blocks.length;i++){
-    for(var w=0;w<blocks[i].len;w++) oldToNew[blocks[i].start+1+w]=newPos++;
-  }
-  // Remap absolute jump targets to new positions
-  for(var i=0;i<len;i++){
-    var inst=code[i],op=inst&0xFF;
-    for(var ji=0;ji<jumpOps.length;ji++){
-      if(op===jumpOps[ji]){
-        var a=(inst>>8)&0xFF;
-        code[i]=bcEncodeBx(op,a,oldToNew[(inst>>16)&0xFFFF]);
-        break;
-      }
-    }
-    // Remap SUPER_TEST_JMP second word absolute target
-    if(op===BC.SUPER_TEST_JMP&&i+1<len){
-      var dw=code[i+1];
-      code[i+1]=bcEncodeBx(0,0,oldToNew[(dw>>16)&0xFFFF]);
-    }
-  }
-  // Build execution-order block list (sorted by original position)
-  var execOrder=blocks.slice().sort(function(a,b){return a.start-b.start;});
-  // Build successor table mapping execution order across shuffled blocks
-  var succ={};
-  for(var i=0;i<execOrder.length;i++){
-    var blk=execOrder[i];
-    for(var w=0;w<blk.len-1;w++) succ[oldToNew[blk.start+1+w]]=oldToNew[blk.start+2+w];
-    if(i+1<execOrder.length){
-      succ[oldToNew[blk.start+blk.len]]=oldToNew[execOrder[i+1].start+1];
-    }
-  }
-  // Rearrange code array per shuffled block order
-  var newCode=[];
-  for(var i=0;i<blocks.length;i++){
-    for(var w=0;w<blocks[i].len;w++) newCode.push(code[blocks[i].start+w]);
-  }
-  proto.code=newCode;
-  proto.succ=succ;
-  proto.startPC=oldToNew[1];
-}
-
-// ─── BYTECODE OPCODE MAP ─────────────────────────────────────────────────────
+// ─── Layer 1 : Polymorphic Opcode Aliases ───────────────────────────────────
+// Layer 2 : Opcode Pool Shuffling (Fisher-Yates on pool of integers)
+// Layer 3 : Dead Opcode Injection (20 dummy opcode values in pool)
+// Generates per-build random opcode mapping: 3 aliases per opcode, shuffled pool, 20 dead values
 function genBytecodeOpcodeMap(){
-  var ALIAS_PER=3;
-  var DEAD_COUNT=20;
+  var ALIAS_PER=3;  // Layer 1: 3 random aliases per opcode
+  var DEAD_COUNT=20; // Layer 3: 20 dummy opcode values
   var totalOps=BC_COUNT*(1+ALIAS_PER)+DEAD_COUNT+30;
   // Shuffle pool
   var pool=[];
@@ -1687,29 +1559,24 @@ function luaByteLiteral(bytes){
 
 // ─── PROTOTYPE SERIALIZER ────────────────────────────────────────────────────
 function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD,IMUT_SEED,IMUT_MUL,CHAIN_SEED,CHAIN_MULT,CHAIN_ADD){
-  // Layer 53+54: Identify jump targets for chain sync points
+  // ─── Layer 53 : Execution-Trace Chaining (build-time) ──────────────────────
+  // Identify jump targets, compute sync values, encode instructions with chained IMUT key
   var jumpTargets={};
-  jumpTargets[proto.startPC||1]=true; // entry point (may be scrambled)
+  jumpTargets[1]=true; // entry point
   for(var ji=0;ji<proto.code.length;ji++){
     var jinst=proto.code[ji];
     var jop=jinst&0xFF;
     var jpc=ji+1;
     if(jop===BC.JMP||jop===BC.FORLOOP||jop===BC.FORPREP||jop===BC.TFORLOOP){
-      var jBx=(jinst>>16)&0xFFFF; // Layer 54: absolute target
-      if(jBx>=1&&jBx<=proto.code.length)jumpTargets[jBx]=true;
-    }
-    if(jop===BC.SUPER_TEST_JMP&&ji+1<proto.code.length){
-      var dwInst=proto.code[ji+1];
-      var dwBx=(dwInst>>16)&0xFFFF;
-      if(dwBx>=1&&dwBx<=proto.code.length)jumpTargets[dwBx]=true;
+      var jsBx=((jinst>>16)&0xFFFF)-32767;
+      var jtarget=jpc+1+jsBx; // +1 because runtime pc is already incremented before dispatch
+      if(jtarget>=1&&jtarget<=proto.code.length)jumpTargets[jtarget]=true;
     }
     if(jop===BC.EQ||jop===BC.LT||jop===BC.LE||jop===BC.TEST||jop===BC.TESTSET){
-      var _s1=proto.succ[jpc];
-      if(_s1!==undefined){var _s2=proto.succ[_s1];if(_s2!==undefined)jumpTargets[_s2]=true;}
+      if(jpc+2<=proto.code.length)jumpTargets[jpc+2]=true;
     }
     if(jop===BC.LOADBOOL&&((jinst>>>24)&0xFF)!==0){
-      var _s1b=proto.succ[jpc];
-      if(_s1b!==undefined){var _s2b=proto.succ[_s1b];if(_s2b!==undefined)jumpTargets[_s2b]=true;}
+      if(jpc+2<=proto.code.length)jumpTargets[jpc+2]=true;
     }
   }
   // Compute deterministic sync values for each jump target
@@ -1718,22 +1585,11 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
     var stpc=parseInt(st);
     syncTable[stpc]=((CHAIN_SEED*stpc+CHAIN_ADD)&0xFFFFFF);
   }
-  // Layer 54: Build encoding order (execution order via successor chain)
-  var encOrder=[];
-  var _visited={};
-  var _p=proto.startPC||1;
-  while(_p!==undefined&&_p>=1&&_p<=proto.code.length&&!_visited[_p]){
-    _visited[_p]=true;encOrder.push(_p);_p=proto.succ[_p];
-  }
-  for(var _ui=0;_ui<proto.code.length;_ui++){
-    if(!_visited[_ui+1]){encOrder.push(_ui+1);syncTable[_ui+1]=((CHAIN_SEED*(_ui+1)+CHAIN_ADD)&0xFFFFFF);}
-  }
-  // Encode instructions in execution order with chained IMUT key
+  // Encode instructions with chained IMUT key (Layer 53)
   var encCode=new Array(proto.code.length);
-  var chain=syncTable[encOrder[0]]||0;
-  for(var oi=0;oi<encOrder.length;oi++){
-    var pc1=encOrder[oi];
-    var ei=pc1-1;
+  var chain=syncTable[1];
+  for(var ei=0;ei<proto.code.length;ei++){
+    var pc1=ei+1;
     if(syncTable[pc1]!==undefined)chain=syncTable[pc1];
     var mutKey=((chain*IMUT_SEED+IMUT_MUL)&0xFFFFFF);
     var inst=proto.code[ei];
@@ -1755,8 +1611,8 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
         newOp=allOps[Math.floor(Math.random()*allOps.length)];
       }
     }
-    newOp=newOp^AOXR;
-    var bytes=[0,0,0,0];
+    newOp=newOp^AOXR; // Layer 4 : Opcode XOR Masking (AOXR)
+    var bytes=[0,0,0,0]; // Layer 7 : Field Permutation (FIELD_ORDER)
     bytes[FIELD_ORDER[0]]=newOp&0xFF;
     bytes[FIELD_ORDER[1]]=a;
     bytes[FIELD_ORDER[2]]=b;
@@ -1792,7 +1648,8 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
     return'{0}';
   });
   var kStr='{'+kParts.join(',')+'}';
-  // Sub-prototypes
+  // ─── Layer 29 : Per-Proto Rolling XOR ─────────────────────────────────────
+  // Sub-prototypes encrypted with per-index key, decrypted lazily on first CLOSURE
   var pParts=proto.p.map(function(sp,idx){
     var subStr=bcSerializePrototype(sp,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KEY,KENC_MUL,FENC_KEY,FENC_MUL,FENC_ADD,IMUT_SEED,IMUT_MUL,CHAIN_SEED,CHAIN_MULT,CHAIN_ADD);
     var factoryStr='return function(_SS) return '+subStr+' end';
@@ -1802,12 +1659,7 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
   var pStr='{'+pParts.join(',')+'}';
   // Upvalue descriptors
   var upStr='{'+proto.updescs.map(function(d){return'{'+(d.instack?1:0)+','+d.idx+'}';}).join(',')+'}';
-  // Layer 54: Serialize successor table as PROTO[9] and startPC as PROTO[10]
-  var succParts=[];
-  if(proto.succ){for(var sk2 in proto.succ){succParts.push('['+sk2+']='+proto.succ[sk2]);}}
-  var succStr='{'+succParts.join(',')+'}';
-  var startPCVal=proto.startPC||1;
-  return'{'+[codeStr,kStr,pStr,upStr,proto.numparams,proto.is_vararg?'true':'false',proto.maxstack,syncStr,succStr,startPCVal].join(',')+'}';
+  return'{'+[codeStr,kStr,pStr,upStr,proto.numparams,proto.is_vararg?'true':'false',proto.maxstack,syncStr].join(',')+'}';
 }
 
 function encryptProtoString(plainStr,protoIdx,FENC_KEY,FENC_MUL,FENC_ADD){
@@ -1824,7 +1676,8 @@ function encryptProtoString(plainStr,protoIdx,FENC_KEY,FENC_MUL,FENC_ADD){
 
 // ─── BYTECODE VM GENERATOR ──────────────────────────────────────────────────
 function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys,kEncKeyExpr,kEncMulExpr,fencKeyExpr,fencMulExpr,fencAddExpr,imutSeedExpr,imutMulExpr,BUILD_ID,watermarkIdx,MBA_TEMPLATE,encNum,chainMultExpr,chainAddExpr){
-  // Reuse name generator and encryption from tree-walking mode
+  // ─── Layer 24 : Random Variable Names ────────────────────────────────────
+  // 6-10 char strings from lLiI1 charset, deduplicated per build
   var _usedNames=new Set();
   function rn(){
     var pool='lLiI1';
@@ -1841,7 +1694,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     }
     return arr;
   }
-  // Expression polymorphism — randomly select equivalent math expressions
+  // ─── Layer 41 : Expression Polymorphism ───────────────────────────────────
+  // Randomly select %N vs bit32.band/rshift equivalents per build
   function polyMod256(expr){
     return Math.random()<0.5?expr+'%256':'bit32.band('+expr+',255)';
   }
@@ -1868,7 +1722,10 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
    'RK','dispatch','RT','tCnt','tExp2'
   ].forEach(function(n){R[n]=rn();});
 
-  // String encryption (same as tree-walking)
+  // ─── Layer 11 : Stateful String Encryption ─────────────────────────────────
+  // Layer 12 : Dual-Key Decryption (EKA/EKB — two independently derived key arrays)
+  // Layer 13 : Position-Dependent EKB (saltA + i*SMUL + SADD) % 256
+  // Rolling XOR key shifts per-string via cumulative length
   var KEY_LEN=16;
   var masterKey=Array.from({length:KEY_LEN},function(){return Math.floor(Math.random()*254)+1;});
   var saltA=Array.from({length:KEY_LEN},function(){return Math.floor(Math.random()*254)+1;});
@@ -1881,7 +1738,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   var HMUL=(Math.floor(Math.random()*126)+1)*2+1;
   var HADD=Math.floor(Math.random()*254)+1;
 
-  // Build OPDEC table: maps XOR'd(random_op) → canonical index
+  // ─── Layer 5 : OPDEC Lookup Table ────────────────────────────────────────
+  // Maps XOR'd(random_op) → canonical index
   var opdecEntries=[];
   var opKeys=Object.keys(BC);
   for(var oki=0;oki<opKeys.length;oki++){
@@ -1916,11 +1774,13 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
 
   // Replace _S references in protoStr with safe name
   var safeProtoStr=protoStr.replace(/_S\[/g,R.S+'[');
-  // Factory function
+  // ─── Layer 16 : Factory Function Wrapper ──────────────────────────────────
+  // function(_SS) return {...} end — passes string table
   var factoryProtoStr=safeProtoStr.replace(new RegExp(R.S.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\[','g'),'_SS[');
   var factoryStr='return function(_SS) return '+factoryProtoStr+' end';
 
-  // Encrypt factory string (rolling XOR)
+  // ─── Layer 15 : Sequential AST Encryption ──────────────────────────────────
+  // Rolling XOR — each byte depends on all prior plaintext bytes
   var AST_MOD=16777216;
   var AST_SEED=Math.floor(Math.random()*(AST_MOD-1))+1;
   var AST_MULT=(Math.floor(Math.random()*126)+1)*2+1;
@@ -1955,7 +1815,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     _tChk=(_tChk*TMUL+opdecPairs[op].v+1)%TMOD;
   }
 
-  // Layer B: delayed OPDEC verification (build-time computation)
+  // ─── Layer 26 : Anti-Tamper Layer B (build-time) ───────────────────────────
+  // Delayed OPDEC key verification after 500 instructions; corrupts hidden table
   var TMOD_B=1000000007;
   var TSEED2=Math.floor(Math.random()*TMOD_B);
   var TMUL2=Math.floor(Math.random()*900)+100;
@@ -1967,7 +1828,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   var _tExp2Enc=_tChk2^MASK2;
   var opdecCount=opdecPairs.length;
 
-  // Opaque predicates (same as tree-walking)
+  // ─── Layer 22 : Opaque True/False Predicates ───────────────────────────────
+  // Layer 40 : Opaque Predicate Expansion (9 true + 8 false templates)
   function genOpaqueTrue(){
     var tpls=[
       function(){var N=Math.floor(Math.random()*0xFFFF)+1;return'bit32.band('+N+','+N+')=='+N;},
@@ -2045,20 +1907,20 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
 
   var lines=[];
 
-  // Setup — _GENV must come first, then 3 independent blocks in random order
+  // ─── Layer 47 : Initialization Order Randomization ─────────────────────────
+  // __tostring, getfenv/setfenv, rawequal blocks shuffled per build
   lines.push('local _GENV=getgenv and getgenv() or _G');
-  // Build 3 independent init blocks, then shuffle their order
   var _envRef=rn();
   var _cachedFn=rn();
   var initBlocks=[
-    // Block A: __tostring hijacking
+    // Layer 28 : __tostring Hijacking — poisons string/number metatable __tostring
     ['pcall(function() local _mt=getmetatable("") if _mt then _mt.__tostring=nil end end)',
      'pcall(function() local _mt=getmetatable(0) if _mt then _mt.__tostring=nil end end)'],
-    // Block B: getfenv/setfenv override
+    // Layer 36 : Environment Locking — overrides getfenv/setfenv
     ['local '+_envRef+'=_GENV',
      'pcall(function() _GENV.getfenv=function() return '+_envRef+' end end)',
      'pcall(function() _GENV.setfenv=function() end end)'],
-    // Block C: rawequal cache
+    // Layer 36 : Environment Locking — rawequal cache for periodic integrity check
     ['local '+_cachedFn+'=rawequal']
   ];
   shuffle(initBlocks);
@@ -2067,7 +1929,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
       lines.push(initBlocks[ib][ibl]);
     }
   }
-  // Phase 2.1: Roblox environment gate — XOR EKA byte with env-derived key
+  // ─── Layer 44 : Roblox Environment Gate ────────────────────────────────────
+  // EKA byte pre-XOR'd with value derived from game/workspace type checks
   var ENV_MULT=Math.floor(Math.random()*60)+5;
   var ENV_IDX=Math.floor(Math.random()*KEY_LEN); // which EKA byte to XOR
   var ENV_EXPECTED=3; // game(1)+workspace(2)=3 in real Roblox
@@ -2087,120 +1950,18 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+R.sHash+'='+HSEED);
   lines.push('local '+R.nextSI+'=1');
 
-  // String decryption — randomly pick lazy metatable (A) or eager decode (B)
+  // ─── Layer 14 : Lazy String Metatable / Layer 49 : String Decryption Variation
+  // Randomly picks lazy metatable (A) or eager for-loop decode (B) per build
   var STR_DECRYPT_VARIANT=Math.floor(Math.random()*2);
-
-  // Layer 56: Mini-VM for string decryption
-  // Opaque function with randomized intermediate variables + shuffled computation order.
-  // 12 opcodes encoded as a bytecode program interpreted by a stack VM.
-  // Opcode permutation (shuffled per build)
-  var MVM_OPS=['PUSH','LOAD','STORE','XOR','MOD','ADD','MUL','SBYTE','BAND','SUB','DUP','TGET'];
-  var mvmPerm=Array.from({length:12},function(_,i){return i;});
-  shuffle(mvmPerm);
-  var mvmOp={};
-  for(var mi=0;mi<MVM_OPS.length;mi++) mvmOp[MVM_OPS[mi]]=mvmPerm[mi];
-
-  // Compile decryption algorithm into mini-VM bytecode
-  // Input regs: 1=ki, 2=stringIdx, 3=accLen, 4=sHash, 5=EKA, 6=EKB, 7=ES[idx]
-  var mvBC=[];
-  function mvE(v){mvBC.push(v);}
-  function mvPush(v){mvE(mvmOp.PUSH);mvE(v);}
-  function mvLoad(r){mvE(mvmOp.LOAD);mvE(r);}
-  function mvStore(r){mvE(mvmOp.STORE);mvE(r);}
-  function mvBin(n){mvE(mvmOp[n]);}
-  function mvMod256(){if(Math.random()<0.5){mvPush(256);mvBin('MOD');}else{mvPush(255);mvBin('BAND');}}
-
-  // _ki = (idx+ki-1+accLen) % KEY_LEN + 1  →  reg[8]
-  mvLoad(2);mvLoad(1);mvBin('ADD');mvPush(1);mvBin('SUB');mvLoad(3);mvBin('ADD');
-  mvPush(KEY_LEN);mvBin('MOD');mvPush(1);mvBin('ADD');mvStore(8);
-  // _inc = ((_ki-1)*SMUL+SADD) % 256  →  reg[9]
-  mvLoad(8);mvPush(1);mvBin('SUB');mvPush(SMUL);mvBin('MUL');mvPush(SADD);mvBin('ADD');mvMod256();mvStore(9);
-  // _sa = (EKB[_ki]-_inc+256) % 256  →  reg[10]
-  mvLoad(6);mvLoad(8);mvBin('TGET');mvLoad(9);mvBin('SUB');mvPush(256);mvBin('ADD');mvMod256();mvStore(10);
-  // encByte = string.byte(ES[idx], ki)  →  reg[11]
-  mvLoad(7);mvLoad(1);mvBin('SBYTE');mvStore(11);
-  // key = XOR(EKA[_ki], _sa)  →  reg[12]
-  mvLoad(5);mvLoad(8);mvBin('TGET');mvLoad(10);mvBin('XOR');mvStore(12);
-  // plainByte = XOR(encByte, key, sHash%256) → top of stack (returned)
-  mvLoad(4);mvMod256();mvLoad(11);mvBin('XOR');mvLoad(12);mvBin('XOR');
-
-  // Emit mini-VM interpreter function
-  var mvmFnVar=rn(),mvmBCVar=rn();
-  var mvR=rn(),mvSt2=rn(),mvSP=rn(),mvPC=rn(),mvInst=rn(),mvTmp=rn();
-  lines.push('local '+mvmFnVar);
-  lines.push('do');
-  lines.push('  local '+mvmBCVar+'={'+mvBC.join(',')+'}');
-  lines.push('  '+mvmFnVar+'=function('+mvR+')');
-  lines.push('    local '+mvSt2+'={}');
-  lines.push('    local '+mvSP+'=0');
-  lines.push('    local '+mvPC+'=1');
-  lines.push('    local '+mvmBCVar+'='+mvmBCVar);
-  lines.push('    while '+mvPC+'<=#'+mvmBCVar+' do');
-  lines.push('      local '+mvInst+'='+mvmBCVar+'['+mvPC+']');
-
-  // Build handler array and shuffle branch order
-  var mvmH=[];
-  mvmH.push({op:mvmOp.PUSH,code:[
-    mvPC+'='+mvPC+'+1',
-    mvSP+'='+mvSP+'+1',
-    mvSt2+'['+mvSP+']='+mvmBCVar+'['+mvPC+']']});
-  mvmH.push({op:mvmOp.LOAD,code:[
-    mvPC+'='+mvPC+'+1',
-    mvSP+'='+mvSP+'+1',
-    mvSt2+'['+mvSP+']='+mvR+'['+mvmBCVar+'['+mvPC+']]']});
-  mvmH.push({op:mvmOp.STORE,code:[
-    mvPC+'='+mvPC+'+1',
-    mvR+'['+mvmBCVar+'['+mvPC+']]='+mvSt2+'['+mvSP+']',
-    mvSP+'='+mvSP+'-1']});
-  mvmH.push({op:mvmOp.XOR,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']=bit32.bxor('+mvSt2+'['+mvSP+'],'+mvSt2+'['+mvSP+'+1])']});
-  mvmH.push({op:mvmOp.MOD,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']='+mvSt2+'['+mvSP+']%'+mvSt2+'['+mvSP+'+1]']});
-  mvmH.push({op:mvmOp.ADD,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']='+mvSt2+'['+mvSP+']+'+mvSt2+'['+mvSP+'+1]']});
-  mvmH.push({op:mvmOp.MUL,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']='+mvSt2+'['+mvSP+']*'+mvSt2+'['+mvSP+'+1]']});
-  mvmH.push({op:mvmOp.SBYTE,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']=string.byte('+mvSt2+'['+mvSP+'],'+mvSt2+'['+mvSP+'+1])']});
-  mvmH.push({op:mvmOp.BAND,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']=bit32.band('+mvSt2+'['+mvSP+'],'+mvSt2+'['+mvSP+'+1])']});
-  mvmH.push({op:mvmOp.SUB,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']='+mvSt2+'['+mvSP+']-'+mvSt2+'['+mvSP+'+1]']});
-  mvmH.push({op:mvmOp.DUP,code:[
-    mvSP+'='+mvSP+'+1',
-    mvSt2+'['+mvSP+']='+mvSt2+'['+mvSP+'-1]']});
-  mvmH.push({op:mvmOp.TGET,code:[
-    mvSP+'='+mvSP+'-1',
-    mvSt2+'['+mvSP+']='+mvSt2+'['+mvSP+']['+mvSt2+'['+mvSP+'+1]]']});
-  shuffle(mvmH);
-
-  // Emit dispatch chain
-  for(var mhi=0;mhi<mvmH.length;mhi++){
-    var branch=(mhi===0)?'      if ':'      elseif ';
-    lines.push(branch+mvInst+'=='+mvmH[mhi].op+' then');
-    for(var mli=0;mli<mvmH[mhi].code.length;mli++){
-      lines.push('        '+mvmH[mhi].code[mli]);
-    }
-  }
-  lines.push('      end');
-  lines.push('      '+mvPC+'='+mvPC+'+1');
-  lines.push('    end');
-  lines.push('    return '+mvSt2+'['+mvSP+']');
-  lines.push('  end');
-  lines.push('end');
-
-  // Helper: emit the inner decryption loop body for one string (calls mini-VM)
+  // Helper: emit the inner decryption loop body for one string
   function emitStrDecryptLoop(idxExpr,indent){
     lines.push(indent+'local '+R.dR+'={}');
     lines.push(indent+'for '+R.ki+'=1,#'+R.ES+'['+idxExpr+'] do');
-    lines.push(indent+'  '+R.dR+'['+R.ki+']=string.char('+mvmFnVar+'({'+R.ki+','+idxExpr+','+R.accLen+','+R.sHash+','+R.EKA+','+R.EKB+','+R.ES+'['+idxExpr+']}))');
+    lines.push(indent+'  local _ki=('+idxExpr+'+'+R.ki+'-1+'+R.accLen+')%'+KEY_LEN+'+1');
+    lines.push(indent+'  local _inc='+polyMod256('((_ki-1)*'+SMUL+'+'+SADD+')'));
+    lines.push(indent+'  local _sa='+polyMod256('('+R.EKB+'[_ki]-_inc+256)'));
+    lines.push(indent+'  local _pb=bit32.bxor(string.byte('+R.ES+'['+idxExpr+'],'+R.ki+'),bit32.bxor('+R.EKA+'[_ki],_sa),'+polyMod256(R.sHash)+')');
+    lines.push(indent+'  '+R.dR+'['+R.ki+']=string.char(_pb)');
     lines.push(indent+'end');
     lines.push(indent+'for '+R.ki+'=1,#'+R.dR+' do');
     lines.push(indent+'  '+R.sHash+'='+polyMod16M('('+R.sHash+'*'+HMUL+'+string.byte('+R.dR+'['+R.ki+'],1)+'+HADD+')'));
@@ -2226,22 +1987,25 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     lines.push('end');
   }
 
-  // OPDEC table — Layer 33: metatable dispatch (hidden table + __index wrapper)
+  // ─── Layer 6 : Metatable-Based OPDEC ───────────────────────────────────────
+  // Empty table with __index → hidden table upvalue
   var _hiddenName=rn();
   lines.push('local '+_hiddenName+'={'+opdecEntries.join(',')+'}');
   lines.push('local '+R.OPDEC+'=setmetatable({},{__index=function(_,_k) return '+_hiddenName+'[_k] end})');
 
-  // Layer C: OPDEC entry count check (iterates hidden table)
+  // ─── Layer 27 : Anti-Tamper Layer C ────────────────────────────────────────
+  // OPDEC entry count check — XOR-corrupts hidden table with 255 on mismatch
   lines.push('do local _n=0 for _ in pairs('+_hiddenName+') do _n=_n+1 end');
   lines.push('if _n~='+opdecCount+' then');
   lines.push('  for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]=bit32.bxor('+_hiddenName+'[_k],255) end');
   lines.push('end end');
 
-  // Layer B: delayed verification init
+  // Layer 26 : Anti-Tamper Layer B (runtime init)
   lines.push('local '+R.tCnt+'=0');
   lines.push('local '+R.tExp2+'='+_tExp2Enc);
 
-  // Anti-tamper checksum
+  // ─── Layer 25 : Anti-Tamper Layer A ────────────────────────────────────────
+  // Checksum over strings + AST + EKA + EKB + OPDEC; corrupts EKA on mismatch
   lines.push('local '+R.EAST+'='+encAstLiteral);
   lines.push('do local '+R.tCk+'='+TSEED);
   lines.push('for '+R.tI+'=1,#'+R.ES+' do for '+R.tJ+'=1,#'+R.ES+'['+R.tI+'] do');
@@ -2265,7 +2029,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  for '+R.tI+'=1,#'+R.EKA+' do '+R.EKA+'['+R.tI+']=bit32.bxor('+R.EKA+'['+R.tI+'],171) end');
   lines.push('end end');
 
-  // Phase 2.3: Decoy loadstring traps — look like real AST decrypt but carry garbage
+  // ─── Layer 46 : Decoy Loadstring Traps ─────────────────────────────────────
+  // 2-3 fake AST decrypt loops with encrypted "return function() end" payloads
   var DECOY_COUNT=Math.floor(Math.random()*2)+2; // 2-3 decoys
   for(var dc=0;dc<DECOY_COUNT;dc++){
     var fakeStr='return function() end';
@@ -2295,7 +2060,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     lines.push('end');
   }
 
-  // Phase 2.2: loadstring canary — verify load/loadstring returns a callable
+  // ─── Layer 45 : Loadstring Canary ──────────────────────────────────────────
+  // Verifies loadstring("return A+B") returns callable with correct result. Corrupts EKA on failure.
   var canaryA=Math.floor(Math.random()*9000)+1000;
   var canaryB=Math.floor(Math.random()*9000)+1000;
   var _ckFn=rn();
@@ -2306,7 +2072,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  end');
   lines.push('end');
 
-  // Layer 51: C-Closure / Native Function Verification
+  // ─── Layer 51 : C-Closure / Native Function Verification ───────────────────
   // Verifies type, math.floor, string.byte, nested pcall return correct values.
   // Corrupts EKA on sandbox detection (hooked stdlib functions).
   var _cv1=rn(),_cv2=rn(),_cv3=rn(),_cv4=rn(),_cv5=rn(),_cv6=rn(),_cv7=rn();
@@ -2321,7 +2087,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  end');
   lines.push('end');
 
-  // Decrypt prototype blob
+  // Layer 15 / Layer 16 : AST decryption + factory function execution (runtime)
   lines.push('local '+R.dkAST+'='+AST_SEED);
   lines.push('local '+R.dpAST+'={}');
   lines.push('for _i=1,#'+R.EAST+' do');
@@ -2338,12 +2104,13 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+_fmName+'='+fencMulExpr);
   lines.push('local '+_faName+'='+fencAddExpr);
 
-  // Polymorphic IR keys (Layer 34)
+  // Layer 8 : Polymorphic IR keys (runtime)
   var _imSeed=rn(),_imMul=rn();
   lines.push('local '+_imSeed+'='+imutSeedExpr);
   lines.push('local '+_imMul+'='+imutMulExpr);
 
-  // Decode constants: lazy metatable with encrypted integers
+  // ─── Layer 18 : K Table Lazy Encryption ────────────────────────────────────
+  // Integers XOR'd with per-index key, lazy metatable decrypts on access
   var _decK=rn();
   lines.push('local function '+_decK+'(_kt,_kk,_km)');
   lines.push('  local _raw={}');
@@ -2363,6 +2130,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('    elseif _e[1]==0 then return nil');
   lines.push('    elseif _e[1]==2 then');
   lines.push('      local _mk='+polyMod16M('(_kk*_e[3]+_km)'));
+  // ─── Layer 37 : Constant Blinding / MBA ────────────────────────────────────
+  // Mixed Boolean-Arithmetic expression (3 templates) for K table XOR
   var mbaExpr;
   if(MBA_TEMPLATE===0){
     mbaExpr='bit32.bor(_e[2],_mk)-bit32.band(_e[2],_mk)';
@@ -2377,11 +2146,13 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  end})');
   lines.push('end');
 
-  // Layer 37: Obfuscated magic numbers
-  var _rk128=rn();
+  // Layer 37 : Obfuscated magic numbers (128, 32767 stored via encNum)
+  var _rk128=rn(),_sbx32767=rn();
   lines.push('local '+_rk128+'='+encNum(128));
+  lines.push('local '+_sbx32767+'='+encNum(32767));
 
-  // Register read helper (unwraps upvalue cells)
+  // ─── Layer 31 : Cell-Aware Register Helpers ────────────────────────────────
+  // _rget/_rset/RK transparently unwrap upvalue cells ({val=X, __uv=true})
   var _rget=rn(),_rset=rn();
   lines.push('local function '+_rget+'(_R,_i)');
   lines.push('  local _v=_R[_i]');
@@ -2404,24 +2175,22 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   // Execute function
   lines.push('local '+R.execute);
   lines.push(R.execute+'=function('+R.PROTO+','+R.upvals+','+R.varargs+')');
-  // Layer 52: Clone code array (preserves PROTO[1] for re-callable closures)
+  // ─── Layer 52 : Self-Modifying Code / Code Erasure ─────────────────────────
+  // Clones code array at entry, zeros on RETURN/TAILCALL to prevent memory dumps
   var _clen=rn();
   lines.push('  local '+R.code+'={} local '+_clen+'=#'+R.PROTO+'[1] for _ci=1,'+_clen+' do '+R.code+'[_ci]='+R.PROTO+'[1][_ci] end');
   lines.push('  local '+R.K+'='+_decK+'('+R.PROTO+'[2],'+kEncKeyExpr+','+kEncMulExpr+')');
   lines.push('  local '+R.P+'='+R.PROTO+'[3]');
   lines.push('  local '+R.REG+'={}');
-  lines.push('  local '+R.pc+'='+R.PROTO+'[10]');
+  lines.push('  local '+R.pc+'=1');
   lines.push('  local '+R.top+'=0');
-  // Layer 53: Chain state and sync table
+  // ─── Layer 53 : Execution-Trace Chaining (runtime) ─────────────────────────
+  // Chain state + sync table loaded from PROTO[8]
   var _syncTbl=rn(),_chainVar=rn(),_chainMult=rn(),_chainAdd=rn();
   lines.push('  local '+_syncTbl+'='+R.PROTO+'[8] or {}');
   lines.push('  local '+_chainVar+'=0');
   lines.push('  local '+_chainMult+'='+chainMultExpr);
   lines.push('  local '+_chainAdd+'='+chainAddExpr);
-  // Layer 54: Successor table and current PC tracker
-  var _succVar=rn(),_curPCVar=rn();
-  lines.push('  local '+_succVar+'='+R.PROTO+'[9]');
-  lines.push('  local '+_curPCVar+'=0');
   // Load varargs into register -1 position conceptually (accessible via VARARG instruction)
   lines.push('  local _VA='+R.varargs+' or {}');
   // Load params from varargs into R[0..numparams-1]
@@ -2429,7 +2198,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  if '+R.PROTO+'[6] then');
   lines.push('    local _va2={} for _i='+R.PROTO+'[5]+1,#_VA do _va2[#_va2+1]=_VA[_i] end _VA=_va2');
   lines.push('  end');
-  // Layer 39: Dispatch mechanism — randomly select from 2 patterns per build
+  // ─── Layer 39 : Metamethod Dispatch / Layer 48 : Dispatch Mechanism Variation
+  // Randomly selects __call metamethod (variant 0) or plain function (variant 1) per build
   var DISPATCH_VARIANT=Math.floor(Math.random()*2); // 0=__call metamethod, 1=plain function
   var _tmpVar=rn(),_rvVar=rn();
   if(DISPATCH_VARIANT===0){
@@ -2438,12 +2208,13 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     lines.push('  local '+R.dispatch);
     lines.push('  '+R.dispatch+'=function('+R.inst+')');
   }
-  // Layer 53+54: Sync chain at jump targets using _curPC (set in main loop)
+  // Layer 53 : Sync chain at jump targets, then compute IMUT key from chain state
   var _rawInst=rn(),_svTmp=rn();
   lines.push('    local '+_rawInst+'='+R.inst);
-  lines.push('    local '+_svTmp+'='+_syncTbl+'['+_curPCVar+']');
+  lines.push('    local '+_svTmp+'='+_syncTbl+'['+R.pc+'-1]');
   lines.push('    if '+_svTmp+' then '+_chainVar+'='+_svTmp+' end');
-  // Layer 34: Polymorphic IR — unmutate instruction operands (chain-based key)
+  // ─── Layer 8 : Polymorphic IR ──────────────────────────────────────────────
+  // Non-opcode bytes XOR'd with PC-derived rolling key (chain-based)
   var _imK=rn();
   lines.push('    local '+_imK+'='+polyMod16M('('+_chainVar+'*'+_imSeed+'+'+_imMul+')'));
   // Build XOR mask: place 3 key bytes at the 3 non-opcode byte positions
@@ -2474,7 +2245,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     ls.push('      '+_chainVar+'='+polyMod16M('('+_chainVar+'*'+_chainMult+'+'+rawDw+'+'+_chainAdd+')'));
     return ls;
   }
-  // Layer B: delayed OPDEC verification after 500 instructions
+  // Layer 26 : Anti-Tamper Layer B (runtime check after 500 instructions)
   lines.push('    '+R.tCnt+'='+R.tCnt+'+1');
   lines.push('    if '+R.tCnt+'==500 then');
   lines.push('      local _c2='+TSEED2);
@@ -2484,7 +2255,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('        for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]='+_hiddenName+'[_k]+1 end');
   lines.push('      end');
   lines.push('    end');
-  // Layer 36: periodic environment integrity check
+  // Layer 36 : Environment Locking (periodic rawequal integrity check every 1000 instructions)
   lines.push('    if '+R.tCnt+'%1000==0 and _GENV.rawequal~='+_cachedFn+' then');
   lines.push('      for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]='+_hiddenName+'[_k]+1 end');
   lines.push('    end');
@@ -2504,7 +2275,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   // LOADBOOL
   handlers.push({cond:R.op+'=='+BC.LOADBOOL,body:[
     '      '+_rset+'('+R.REG+','+R.a+','+fieldExpr(R.inst,2)+'~=0)',
-    '      if '+fieldExpr(R.inst,3)+'~=0 then '+R.pc+'='+_succVar+'['+R.pc+'] end'
+    '      if '+fieldExpr(R.inst,3)+'~=0 then '+R.pc+'='+R.pc+'+1 end'
   ]});
   // LOADNIL
   handlers.push({cond:R.op+'=='+BC.LOADNIL,body:[
@@ -2587,33 +2358,34 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   ]});
   // JMP
   handlers.push({cond:R.op+'=='+BC.JMP,body:[
-    '      '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256'
+    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
+    '      '+R.pc+'='+R.pc+'+_sbx'
   ]});
   // EQ
   handlers.push({cond:R.op+'=='+BC.EQ,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      if('+R.RK+'('+R.REG+','+R.K+',_b)=='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+_succVar+'['+R.pc+'] end'
+    '      if('+R.RK+'('+R.REG+','+R.K+',_b)=='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+R.pc+'+1 end'
   ]});
   // LT
   handlers.push({cond:R.op+'=='+BC.LT,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<'+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+_succVar+'['+R.pc+'] end'
+    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<'+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+R.pc+'+1 end'
   ]});
   // LE
   handlers.push({cond:R.op+'=='+BC.LE,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+_succVar+'['+R.pc+'] end'
+    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+R.pc+'+1 end'
   ]});
   // TEST
   handlers.push({cond:R.op+'=='+BC.TEST,body:[
     '      local _c='+fieldExpr(R.inst,3),
-    '      if(not '+_rget+'('+R.REG+','+R.a+'))==(_c~=0) then '+R.pc+'='+_succVar+'['+R.pc+'] end'
+    '      if(not '+_rget+'('+R.REG+','+R.a+'))==(_c~=0) then '+R.pc+'='+R.pc+'+1 end'
   ]});
   // TESTSET
   handlers.push({cond:R.op+'=='+BC.TESTSET,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
     '      local _bv='+_rget+'('+R.REG+',_b)',
-    '      if(not _bv)==(_c~=0) then '+R.pc+'='+_succVar+'['+R.pc+'] else '+_rset+'('+R.REG+','+R.a+',_bv) end'
+    '      if(not _bv)==(_c~=0) then '+R.pc+'='+R.pc+'+1 else '+_rset+'('+R.REG+','+R.a+',_bv) end'
   ]});
   // CALL
   handlers.push({cond:R.op+'=='+BC.CALL,body:[
@@ -2658,14 +2430,16 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      '+_rset+'('+R.REG+','+R.a+',_nv)',
     '      local _limit='+_rget+'('+R.REG+','+R.a+'+1)',
     '      if(_step>0 and _nv<=_limit)or(_step<0 and _nv>=_limit) then',
-    '        '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256',
+    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
+    '        '+R.pc+'='+R.pc+'+_sbx',
     '        '+_rset+'('+R.REG+','+R.a+'+3,_nv)',
     '      end'
   ]});
   // FORPREP
   handlers.push({cond:R.op+'=='+BC.FORPREP,body:[
     '      '+_rset+'('+R.REG+','+R.a+','+_rget+'('+R.REG+','+R.a+')-'+_rget+'('+R.REG+','+R.a+'+2))',
-    '      '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256'
+    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
+    '      '+R.pc+'='+R.pc+'+_sbx'
   ]});
   // TFORCALL
   handlers.push({cond:R.op+'=='+BC.TFORCALL,body:[
@@ -2678,7 +2452,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _v1='+_rget+'('+R.REG+','+R.a+'+1)',
     '      if _v1~=nil then',
     '        '+_rset+'('+R.REG+','+R.a+',_v1)',
-    '        '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256',
+    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
+    '        '+R.pc+'='+R.pc+'+_sbx',
     '      end'
   ]});
   // SETLIST
@@ -2689,7 +2464,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _tbl='+_rget+'('+R.REG+','+R.a+')',
     '      for _i=1,_nb do _tbl[_off+_i]='+_rget+'('+R.REG+','+R.a+'+_i) end'
   ]});
-  // CLOSURE (with per-proto decryption)
+  // Layer 29 : Per-Proto Rolling XOR (runtime decrypt on first CLOSURE)
+  // Layer 30 : Upvalue Cell Encoding ({val=X, __uv=true})
   handlers.push({cond:R.op+'=='+BC.CLOSURE,body:[
     '      local _bx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256',
     '      local _sp='+R.P+'[_bx+1]',
@@ -2745,13 +2521,15 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   handlers.push({cond:R.op+'=='+BC.BNOT,body:[
     '      '+_rset+'('+R.REG+','+R.a+',bit32.bnot('+_rget+'('+R.REG+','+fieldExpr(R.inst,2)+')))'
   ]});
-  // CLOSE: unbox upvalue cells from R[a] to R[maxstack]
+  // ─── Layer 32 : CLOSE Instruction ──────────────────────────────────────────
+  // Unboxes upvalue cells from R[a] to R[maxstack] at scope exit
   handlers.push({cond:R.op+'=='+BC.CLOSE,body:[
     '      for _i='+R.a+','+R.PROTO+'[7] do local _c='+R.REG+'[_i]',
     '        if type(_c)=="table" and _c.__uv then '+R.REG+'[_i]=_c.val end',
     '      end'
   ]});
 
+  // Layer 38 : Superoperator handlers (SUPER_MRET, SUPER_KRET, SUPER_GCALL)
   // SUPER_MRET: MOVE + RETURN(B=2) fused
   handlers.push({cond:R.op+'=='+BC.SUPER_MRET,body:[
     '      local _mr='+_rget+'('+R.REG+','+fieldExpr(R.inst,2)+')',
@@ -2768,7 +2546,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   var sgImut=genImutUnmask('_dw');
   handlers.push({cond:R.op+'=='+BC.SUPER_GCALL,body:[
     '      local _dw='+R.code+'['+R.pc+']',
-    '      '+R.pc+'='+_succVar+'['+R.pc+']',
+    '      '+R.pc+'='+R.pc+'+1',
   ].concat(sgImut).concat([
     '      local _bx='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
     '      local _fn=_GENV['+R.K+'[_bx+1]]',
@@ -2786,67 +2564,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      end'
   ])});
 
-  // SUPER_SELF_CALL: SELF + CALL fused
-  var ssImut=genImutUnmask('_dw');
-  handlers.push({cond:R.op+'=='+BC.SUPER_SELF_CALL,body:[
-    '      local _dw='+R.code+'['+R.pc+']',
-    '      '+R.pc+'='+_succVar+'['+R.pc+']',
-  ].concat(ssImut).concat([
-    '      local _sb='+fieldExpr('_dw',2),
-    '      local _sc='+fieldExpr('_dw',3),
-    '      local _obj='+_rget+'('+R.REG+',_sb)',
-    '      '+_rset+'('+R.REG+','+R.a+'+1,_obj)',
-    '      local _fn=_obj['+R.RK+'('+R.REG+','+R.K+',_sc)]',
-    '      '+_rset+'('+R.REG+','+R.a+',_fn)',
-    '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
-    '      local _as={}',
-    '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
-    '      local _rv=table.pack(pcall(_fn,table.unpack(_as,1,_na)))',
-    '      if not _rv[1] then error(_rv[2],0) end',
-    '      if _c==0 then',
-    '        for _i=2,_rv.n do '+_rset+'('+R.REG+','+R.a+'+_i-2,_rv[_i]) end',
-    '        '+R.top+'='+R.a+'+_rv.n-2',
-    '      else',
-    '        for _i=1,_c-1 do '+_rset+'('+R.REG+','+R.a+'+_i-1,_rv[_i+1]) end',
-    '      end'
-  ])});
-  // SUPER_TEST_JMP: TEST + JMP fused
-  var stImut=genImutUnmask('_dw');
-  handlers.push({cond:R.op+'=='+BC.SUPER_TEST_JMP,body:[
-    '      local _dw='+R.code+'['+R.pc+']',
-    '      '+R.pc+'='+_succVar+'['+R.pc+']',
-  ].concat(stImut).concat([
-    '      local _c='+fieldExpr(R.inst,2),
-    '      if(not '+_rget+'('+R.REG+','+R.a+'))~=(_c~=0) then',
-    '        '+R.pc+'='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
-    '      end'
-  ])});
-  // SUPER_GETTAB_CALL: GETTABLE + CALL fused
-  var sgcImut=genImutUnmask('_dw');
-  handlers.push({cond:R.op+'=='+BC.SUPER_GETTAB_CALL,body:[
-    '      local _dw='+R.code+'['+R.pc+']',
-    '      '+R.pc+'='+_succVar+'['+R.pc+']',
-  ].concat(sgcImut).concat([
-    '      local _gb='+fieldExpr('_dw',2),
-    '      local _gc='+fieldExpr('_dw',3),
-    '      local _fn='+_rget+'('+R.REG+',_gb)['+R.RK+'('+R.REG+','+R.K+',_gc)]',
-    '      '+_rset+'('+R.REG+','+R.a+',_fn)',
-    '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
-    '      local _as={}',
-    '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
-    '      local _rv=table.pack(pcall(_fn,table.unpack(_as,1,_na)))',
-    '      if not _rv[1] then error(_rv[2],0) end',
-    '      if _c==0 then',
-    '        for _i=2,_rv.n do '+_rset+'('+R.REG+','+R.a+'+_i-2,_rv[_i]) end',
-    '        '+R.top+'='+R.a+'+_rv.n-2',
-    '      else',
-    '        for _i=1,_c-1 do '+_rset+'('+R.REG+','+R.a+'+_i-1,_rv[_i+1]) end',
-    '      end'
-  ])});
-
-  // Dead handlers (5-8 with opaque-false conditions)
+  // ─── Layer 20 : Dead Code Handlers ─────────────────────────────────────────
+  // 5-8 unreachable branches with opaque-false conditions
   var nDead=5+Math.floor(Math.random()*4);
   for(var di=0;di<nDead;di++){
     if(di===0){
@@ -2860,14 +2579,16 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     }
   }
 
-  // Inject noop locals into ~80% of handlers
+  // ─── Layer 21 : Noop Local Injection ───────────────────────────────────────
+  // ~80% of handlers get dummy locals with opaque-true values
   for(var hi=0;hi<handlers.length;hi++){
     if(Math.random()<0.8){
       handlers[hi].body.unshift('      local '+rn()+'='+genOpaqueTrue());
     }
   }
 
-  // Shuffle handler order
+  // ─── Layer 19 : Handler Diversification ────────────────────────────────────
+  // Fisher-Yates shuffle of all dispatch handlers per build
   shuffle(handlers);
 
   // Emit dispatch chain
@@ -2890,8 +2611,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   // Main loop — same for both dispatch variants
   lines.push('  while true do');
   lines.push('    local '+_tmpVar+'='+R.code+'['+R.pc+']');
-  lines.push('    '+_curPCVar+'='+R.pc);
-  lines.push('    '+R.pc+'='+_succVar+'['+R.pc+']');
+  lines.push('    '+R.pc+'='+R.pc+'+1');
   lines.push('    local '+_rvVar+'='+R.dispatch+'('+_tmpVar+')');
   lines.push('    if '+_rvVar+'~=nil then return table.unpack('+_rvVar+',1,'+_rvVar+'.n) end');
   lines.push('  end');
@@ -2899,11 +2619,14 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
 
   // Execute the root prototype
   lines.push(R.execute+'('+R.PROTO+',{},{})');
+  // ─── Layer 35 : Build Watermark ───────────────────────────────────────────
+  // Per-build BUILD_ID + BUILD_TS for leak tracing (referenced in dead handler)
   lines.push('local '+rn()+'='+encNum(BUILD_ID));
 
   var innerLines=lines.join('\n');
 
-  // Reference Indirection: replace stdlib calls with RT lookups
+  // ─── Layer 23 : Reference Indirection Table (RT) ──────────────────────────
+  // All stdlib calls → _RT[randomKey] lookups
   var sortedStdlib=STDLIB.slice().sort(function(a,b){return b.length-a.length;});
   for(var ri=0;ri<sortedStdlib.length;ri++){
     var name=sortedStdlib[ri];
@@ -2911,8 +2634,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     var re=new RegExp('\\b'+escaped+'\\b','g');
     innerLines=innerLines.replace(re,R.RT+'['+rtKeys[name]+']');
   }
-  // RT init: shuffle assignment order and interleave with dummy locals for anti-fingerprinting
-  // All RT assignments MUST precede any code that uses _RT[N], so they stay contiguous at top
+  // ─── Layer 42 : RT Table Anti-Fingerprinting ──────────────────────────────
+  // Stdlib assignments shuffled per build, interleaved with opaque-predicate dummy locals
   var shuffledStdlib=STDLIB.slice();
   shuffle(shuffledStdlib);
   var rtInitLines=['local '+R.RT+'={}'];
@@ -2928,14 +2651,16 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   }
   innerLines=rtInitLines.join('\n')+'\n'+innerLines;
 
-  // Phase 2.4: getfenv/setfenv override at outer scope (before payload decode)
+  // ─── Layer 50 : Outer-Scope getfenv Override ───────────────────────────────
+  // getfenv/setfenv locked in LZW wrapper before inner payload decode
   var outerEnvLines=[
     'local _GE=getgenv and getgenv() or _G',
     'pcall(function() _GE.getfenv=function() return _GE end end)',
     'pcall(function() _GE.setfenv=function() end end)'
   ];
 
-  // Try LZW compression + base64 encoding
+  // ─── Layer 33 : Double Loadstring Wrapping ─────────────────────────────────
+  // Defers compilation to runtime via LZW+loadstring or load([=[...]=])
   var compressed=lzwCompress(innerLines);
   var b64=bytesToBase64(compressed);
   var decompOverhead=900;
@@ -2961,7 +2686,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   return fallbackLines.join('\n');
 }
 
-// ─── COMPRESSION ─────────────────────────────────────────────────────────────
+// ─── Layer 34 : LZW + Base64 Compression ────────────────────────────────────
+// Skipped if savings < 15%
 function lzwCompress(input){
   var dict={},dictSize=256;
   for(var i=0;i<256;i++)dict[String.fromCharCode(i)]=i;
@@ -2988,8 +2714,9 @@ function bytesToBase64(bytes){
   return btoa(s);
 }
 
+// ─── Layer 43 : LZW Decompressor Polymorphism ──────────────────────────────
+// 3 structural variants per build: multiplication, bit32 shifts, accumulator
 function lzwDecompressorLua(b64,outerEnvLines){
-  // Random variable name generator for decompressor scope
   var _lzwUsed=new Set();
   function ln(){
     var pool='lLiI1';var s;
@@ -3101,8 +2828,10 @@ function obfuscateBytecodeVM(src){
   var tokens=tokenize(src);
   var ast=parse(tokens);
   var OPMAP=genBytecodeOpcodeMap();
+  // Layer 35 : Build Watermark (BUILD_ID + BUILD_TS)
   var BUILD_ID=Math.floor(Math.random()*0xFFFFFFFF);
   var BUILD_TS=new Date().toISOString().slice(0,19).replace('T',' ');
+  // Layer 37 : Constant Blinding / MBA template selection
   var MBA_TEMPLATE=Math.floor(Math.random()*3);
   // Compile AST to prototype
   var proto=bcCompileTopLevel(ast);
@@ -3110,8 +2839,6 @@ function obfuscateBytecodeVM(src){
   fuseInstructions(proto);
   // Inject garbage bytecode (dead instructions + opaque branches)
   injectGarbage(proto);
-  // Layer 54: Control flow flattening (scramble code, build successor table)
-  scrambleCode(proto);
   // String dedup
   var _strMap=new Map(),_strArr=[];
   function encStr(s){
@@ -3121,6 +2848,8 @@ function obfuscateBytecodeVM(src){
   encStr(BUILD_TS);
   var watermarkIdx=_strArr.length;
   function rand(lo,hi){return Math.floor(Math.random()*(hi-lo+1))+lo;}
+  // ─── Layer 17 : Polymorphic Number Encoding ────────────────────────────────
+  // 6 templates: XOR, add/sub, double-XOR, floor/div, band/bor, lshift/rshift
   function encNum(n,depth){
     if(!isFinite(n))return n>0?'(1/0)':'-(1/0)';
     if(n===0)return'0';
@@ -3149,23 +2878,25 @@ function obfuscateBytecodeVM(src){
       }
     }
   }
-  // Randomize field order
+  // ─── Layer 7 : Field Permutation (FIELD_ORDER) ─────────────────────────────
+  // op/a/b/c byte positions randomized per build
   var FIELD_ORDER=[0,1,2,3];
   for(var fo=3;fo>0;fo--){
     var fj=Math.floor(Math.random()*(fo+1));
     var ft=FIELD_ORDER[fo];FIELD_ORDER[fo]=FIELD_ORDER[fj];FIELD_ORDER[fj]=ft;
   }
+  // ─── Layer 4 : Opcode XOR Masking (AOXR) ──────────────────────────────────
   var AOXR=Math.floor(Math.random()*253)+1;
-  // K table encryption keys
+  // ─── Layer 18 : K Table Lazy Encryption (build-time keys) ────────────────
   var KENC_KEY=Math.floor(Math.random()*0xFFFF)+1;
   var KENC_MUL=Math.floor(Math.random()*900)+100;
   var FENC_KEY=Math.floor(Math.random()*0xFFFFFF)+1;
   var FENC_MUL=Math.floor(Math.random()*900)+100;
   var FENC_ADD=Math.floor(Math.random()*254)+1;
-  // Polymorphic IR keys (Layer 34)
+  // ─── Layer 8 : Polymorphic IR (build-time keys) ───────────────────────────
   var IMUT_SEED=Math.floor(Math.random()*0xFFFFFF)+1;
   var IMUT_MUL=Math.floor(Math.random()*900)+100;
-  // Layer 53: Execution-trace chaining keys
+  // ─── Layer 53 : Execution-Trace Chaining (build-time keys) ───────────────
   var CHAIN_SEED=Math.floor(Math.random()*0xFFFFFF)+1;
   var CHAIN_MULT=(Math.floor(Math.random()*126)+1)*2+1; // odd, 3-253
   var CHAIN_ADD=Math.floor(Math.random()*254)+1;
@@ -3175,7 +2906,7 @@ function obfuscateBytecodeVM(src){
   var fencKeyExpr=encNum(FENC_KEY);
   var fencMulExpr=encNum(FENC_MUL);
   var fencAddExpr=encNum(FENC_ADD);
-  // Reference Indirection: stdlib lookup table
+  // ─── Layer 23 : Reference Indirection Table (build-time keys) ─────────────
   var STDLIB=[
     'bit32.bxor','bit32.band','bit32.bor','bit32.bnot','bit32.rshift','bit32.lshift',
     'table.pack','table.unpack','table.concat','table.sort',
