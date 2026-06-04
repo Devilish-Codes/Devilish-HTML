@@ -593,7 +593,12 @@ BCScope.prototype.resolve=function(name){
 
 function bcNewProto(){
   return{code:[],k:[],p:[],updescs:[],numparams:0,is_vararg:false,maxstack:2,
-    _upvalues:[],_upvalueMap:{},_kmap:{}};
+    _upvalues:[],_upvalueMap:{},_kmap:{},_krefB:new Set(),_krefC:new Set()};
+}
+function bcMarkKRef(proto,bIsK,cIsK){
+  var pc=proto.code.length-1;
+  if(bIsK)proto._krefB.add(pc);
+  if(cIsK)proto._krefC.add(pc);
 }
 function bcAddK(proto,val){
   var key=typeof val==='string'?'s:'+val:typeof val==='number'?'n:'+val:typeof val==='boolean'?'b:'+val:'nil';
@@ -623,15 +628,15 @@ function bcPatchsBx(proto,pc,target){
 }
 function bcRK(proto,scope,expr){
   // Try to encode as constant in RK field (128+idx, max idx=127)
-  if(expr.k==='num'){var ki=bcAddK(proto,expr.v);if(ki<=127)return{rk:128+ki,temp:false};}
-  if(expr.k==='str'){var ki2=bcAddK(proto,expr.v);if(ki2<=127)return{rk:128+ki2,temp:false};}
-  if(expr.k==='true'){var ki3=bcAddK(proto,true);if(ki3<=127)return{rk:128+ki3,temp:false};}
-  if(expr.k==='false'){var ki4=bcAddK(proto,false);if(ki4<=127)return{rk:128+ki4,temp:false};}
-  if(expr.k==='nil'){var ki5=bcAddK(proto,null);if(ki5<=127)return{rk:128+ki5,temp:false};}
+  if(expr.k==='num'){var ki=bcAddK(proto,expr.v);if(ki<=127)return{rk:128+ki,temp:false,isK:true};}
+  if(expr.k==='str'){var ki2=bcAddK(proto,expr.v);if(ki2<=127)return{rk:128+ki2,temp:false,isK:true};}
+  if(expr.k==='true'){var ki3=bcAddK(proto,true);if(ki3<=127)return{rk:128+ki3,temp:false,isK:true};}
+  if(expr.k==='false'){var ki4=bcAddK(proto,false);if(ki4<=127)return{rk:128+ki4,temp:false,isK:true};}
+  if(expr.k==='nil'){var ki5=bcAddK(proto,null);if(ki5<=127)return{rk:128+ki5,temp:false,isK:true};}
   // Fall back to loading into temp register
   var t=scope.allocTemp();
   bcCompileExpr(expr,proto,scope,t,false);
-  return{rk:t,temp:true};
+  return{rk:t,temp:true,isK:false};
 }
 
 // ─── EXPRESSION COMPILER ─────────────────────────────────────────────────────
@@ -680,6 +685,7 @@ function bcCompileExpr(expr,proto,scope,target,wantMulti){
       scope.freeTemp(saveReg);
     }else{
       bcEmit(proto,BC.GETTABLE,target,objR,128+fki);
+      bcMarkKRef(proto,false,true);
       scope.freeTemp(saveReg);
     }
     break;
@@ -690,6 +696,7 @@ function bcCompileExpr(expr,proto,scope,target,wantMulti){
     bcCompileExpr(expr.obj,proto,scope,objR2,false);
     var idxRK=bcRK(proto,scope,expr.idx);
     bcEmit(proto,BC.GETTABLE,target,objR2,idxRK.rk);
+    bcMarkKRef(proto,false,idxRK.isK);
     scope.freeTemp(saveReg2);
     break;
   }
@@ -737,6 +744,8 @@ function bcCompileExpr(expr,proto,scope,target,wantMulti){
       else if(expr.op==='=='){cmpOp=BC.EQ;cmpA=0;}
       else{cmpOp=BC.EQ;cmpA=1;} // ~= is EQ with A=1 (skip if equal)
       bcEmit(proto,cmpOp,cmpA,cmpB,cmpC);
+      var _swp=(expr.op==='>'||expr.op==='>=');
+      bcMarkKRef(proto,_swp?rRK.isK:lRK.isK,_swp?lRK.isK:rRK.isK);
       bcEmitsBx(proto,BC.JMP,0,1); // skip next if condition false
       bcEmit(proto,BC.LOADBOOL,target,1,1); // true, skip next
       bcEmit(proto,BC.LOADBOOL,target,0,0); // false
@@ -750,6 +759,7 @@ function bcCompileExpr(expr,proto,scope,target,wantMulti){
       var bL=bcRK(proto,scope,expr.l);
       var bR=bcRK(proto,scope,expr.r);
       bcEmit(proto,bop,target,bL.rk,bR.rk);
+      bcMarkKRef(proto,bL.isK,bR.isK);
       scope.freeTemp(saveR4);
       break;
     }
@@ -803,8 +813,10 @@ function bcCompileExpr(expr,proto,scope,target,wantMulti){
       var mkR=scope.allocTemp();
       bcEmitBx(proto,BC.LOADK,mkR,mki);
       bcEmit(proto,BC.SELF,base7,objTemp7,mkR);
+      // mkR is a register (LOADK target), no K ref
     }else{
       bcEmit(proto,BC.SELF,base7,objTemp7,128+mki);
+      bcMarkKRef(proto,false,true);
     }
     // Args start at base7+2
     var nargs7=expr.args.length;
@@ -855,6 +867,7 @@ function bcCompileExpr(expr,proto,scope,target,wantMulti){
         var keyRK=bcRK(proto,scope,fld.key);
         var valRK=bcRK(proto,scope,fld.val);
         bcEmit(proto,BC.SETTABLE,target,keyRK.rk,valRK.rk);
+        bcMarkKRef(proto,keyRK.isK,valRK.isK);
         scope.freeTemp(kvSave);
       }else if(fld.k==='nv'){
         // named field: obj[name]=val
@@ -865,8 +878,10 @@ function bcCompileExpr(expr,proto,scope,target,wantMulti){
           var nkR=scope.allocTemp();
           bcEmitBx(proto,BC.LOADK,nkR,nki);
           bcEmit(proto,BC.SETTABLE,target,nkR,nvValRK.rk);
+          bcMarkKRef(proto,false,nvValRK.isK);
         }else{
           bcEmit(proto,BC.SETTABLE,target,128+nki,nvValRK.rk);
+          bcMarkKRef(proto,true,nvValRK.isK);
         }
         scope.freeTemp(nvSave);
       }
@@ -966,8 +981,10 @@ function bcCompileStmt(stmt,proto,scope){
           var fkR=scope.allocTemp();
           bcEmitBx(proto,BC.LOADK,fkR,fkiA);
           bcEmit(proto,BC.SETTABLE,objR,fkR,srcReg);
+          // fkR is register (LOADK target), no K ref
         }else{
           bcEmit(proto,BC.SETTABLE,objR,128+fkiA,srcReg);
+          bcMarkKRef(proto,true,false);
         }
         scope.freeTemp(objSave);
       }else if(tgt.k==='index'){
@@ -976,6 +993,7 @@ function bcCompileStmt(stmt,proto,scope){
         bcCompileExpr(tgt.obj,proto,scope,objR2,false);
         var idxRK2=bcRK(proto,scope,tgt.idx);
         bcEmit(proto,BC.SETTABLE,objR2,idxRK2.rk,srcReg);
+        bcMarkKRef(proto,idxRK2.isK,false);
         scope.freeTemp(idxSave);
       }
     }
@@ -1239,7 +1257,8 @@ function bcCompileStmt(stmt,proto,scope){
       var fdFKI=bcAddK(proto,fdTgt.f);
       if(fdFKI>127){var fdFKR=scope.allocTemp();bcEmitBx(proto,BC.LOADK,fdFKR,fdFKI);
         bcEmit(proto,BC.SETTABLE,fdObjR,fdFKR,fdFuncReg);
-      }else{bcEmit(proto,BC.SETTABLE,fdObjR,128+fdFKI,fdFuncReg);}
+      }else{bcEmit(proto,BC.SETTABLE,fdObjR,128+fdFKI,fdFuncReg);
+        bcMarkKRef(proto,true,false);}
     }
     scope.freeTemp(fdSave);
     break;
@@ -1288,6 +1307,109 @@ function bcCompileTopLevel(ast){
   bcEmit(proto,BC.RETURN,0,1);
   proto.updescs=proto._upvalues.map(function(u){return{instack:u.instack,idx:u.idx};});
   return proto;
+}
+
+// ─── RK Encoding Fixup ──────────────────────────────────────────────────────
+// Fixes RK threshold collision: functions with maxstack>128 have register indices
+// that collide with K-constant inline encoding (128+ki). Re-encodes K refs to use
+// maxstack as threshold, inserts LOADK for overflow cases (maxstack+ki>255).
+function fixRKEncoding(proto){
+  for(var i=0;i<proto.p.length;i++)fixRKEncoding(proto.p[i]);
+  if(proto.maxstack<=128){
+    proto.rkThreshold=128;
+    return;
+  }
+  var threshold=proto.maxstack;
+  // Check if any K refs overflow at this threshold
+  var hasOverflow=false;
+  for(var pc=0;pc<proto.code.length;pc++){
+    var inst=proto.code[pc];
+    var b=(inst>>16)&0xFF,c=(inst>>>24)&0xFF;
+    if(proto._krefB.has(pc)&&threshold+(b-128)>255){hasOverflow=true;break;}
+    if(proto._krefC.has(pc)&&threshold+(c-128)>255){hasOverflow=true;break;}
+  }
+  if(!hasOverflow){
+    // Simple case: re-encode K refs in-place (no instruction insertion needed)
+    proto.rkThreshold=threshold;
+    for(var pc=0;pc<proto.code.length;pc++){
+      if(!proto._krefB.has(pc)&&!proto._krefC.has(pc))continue;
+      var inst=proto.code[pc];
+      var op=inst&0xFF,a=(inst>>8)&0xFF,b=(inst>>16)&0xFF,c=(inst>>>24)&0xFF;
+      if(proto._krefB.has(pc))b=threshold+(b-128);
+      if(proto._krefC.has(pc))c=threshold+(c-128);
+      proto.code[pc]=(op&0xFF)|((a&0xFF)<<8)|((b&0xFF)<<16)|((c&0xFF)<<24);
+    }
+    return;
+  }
+  // Overflow case: reserve 2 temp registers for LOADK spill
+  var tempB=proto.maxstack;
+  var tempC=proto.maxstack+1;
+  threshold=proto.maxstack+2;
+  proto.maxstack=threshold;
+  proto.rkThreshold=threshold;
+  var maxInlineK=255-threshold;
+  // Re-encode instructions and collect LOADK insertions
+  var insertions=[];
+  for(var pc=0;pc<proto.code.length;pc++){
+    if(!proto._krefB.has(pc)&&!proto._krefC.has(pc))continue;
+    var inst=proto.code[pc];
+    var op=inst&0xFF,a=(inst>>8)&0xFF,b=(inst>>16)&0xFF,c=(inst>>>24)&0xFF;
+    var prepend=[];
+    if(proto._krefB.has(pc)){
+      var ki=b-128;
+      if(ki<=maxInlineK){b=threshold+ki;}
+      else{prepend.push(bcEncodeBx(BC.LOADK,tempB,ki));b=tempB;}
+    }
+    if(proto._krefC.has(pc)){
+      var ki2=c-128;
+      if(ki2<=maxInlineK){c=threshold+ki2;}
+      else{var reg=prepend.length>0?tempC:tempB;prepend.push(bcEncodeBx(BC.LOADK,reg,ki2));c=reg;}
+    }
+    proto.code[pc]=(op&0xFF)|((a&0xFF)<<8)|((b&0xFF)<<16)|((c&0xFF)<<24);
+    if(prepend.length>0)insertions.push({pos:pc,instrs:prepend});
+  }
+  if(insertions.length===0)return;
+  // Fix jump targets and rebuild code (same approach as injectGarbage)
+  var codeLen=proto.code.length;
+  insertions.sort(function(a,b){return a.pos-b.pos;});
+  var totalInserted=[];
+  var cumulative=0;
+  var insIdx=0;
+  for(var pc=0;pc<=codeLen;pc++){
+    while(insIdx<insertions.length&&insertions[insIdx].pos===pc){
+      cumulative+=insertions[insIdx].instrs.length;
+      insIdx++;
+    }
+    totalInserted[pc]=cumulative;
+  }
+  function newPC(oldPC){return oldPC+(totalInserted[oldPC]||0);}
+  var jumpOps=[BC.JMP,BC.FORLOOP,BC.FORPREP,BC.TFORLOOP];
+  for(var pc=0;pc<codeLen;pc++){
+    var inst=proto.code[pc];
+    var op=inst&0xFF;
+    for(var ji=0;ji<jumpOps.length;ji++){
+      if(op===jumpOps[ji]){
+        var a=(inst>>8)&0xFF;
+        var sbx=((inst>>16)&0xFFFF)-32767;
+        var oldTarget=pc+1+sbx;
+        var newSbx=newPC(oldTarget)-newPC(pc)-1;
+        proto.code[pc]=bcEncodesBx(op,a,newSbx);
+        break;
+      }
+    }
+  }
+  var newCode=[];
+  insIdx=0;
+  for(var pc=0;pc<codeLen;pc++){
+    while(insIdx<insertions.length&&insertions[insIdx].pos===pc){
+      for(var gi=0;gi<insertions[insIdx].instrs.length;gi++){
+        newCode.push(insertions[insIdx].instrs[gi]);
+      }
+      insIdx++;
+    }
+    newCode.push(proto.code[pc]);
+  }
+  proto.code=newCode;
 }
 
 // ─── Layer 38 : Instruction Fusion (Superoperators) ─────────────────────────
@@ -1591,7 +1713,7 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
   for(var ei=0;ei<proto.code.length;ei++){
     var pc1=ei+1;
     if(syncTable[pc1]!==undefined)chain=syncTable[pc1];
-    var mutKey=((chain*IMUT_SEED+IMUT_MUL)&0xFFFFFF);
+    var mutKey=((chain*IMUT_SEED+IMUT_MUL)%16777216);
     var inst=proto.code[ei];
     var op=(inst)&0xFF;
     var a=(inst>>8)&0xFF;
@@ -1625,7 +1747,7 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
       ki++;
     }
     encCode[ei]=bytes[0]|(bytes[1]<<8)|(bytes[2]<<16)|(bytes[3]<<24);
-    chain=((chain*CHAIN_MULT+encCode[ei]+CHAIN_ADD)&0xFFFFFF);
+    chain=(((chain*CHAIN_MULT+encCode[ei]+CHAIN_ADD)%16777216)+16777216)%16777216;
   }
   var codeStr='{'+encCode.join(',')+'}';
   // Serialize sync table as PROTO[8]
@@ -1659,7 +1781,7 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
   var pStr='{'+pParts.join(',')+'}';
   // Upvalue descriptors
   var upStr='{'+proto.updescs.map(function(d){return'{'+(d.instack?1:0)+','+d.idx+'}';}).join(',')+'}';
-  return'{'+[codeStr,kStr,pStr,upStr,proto.numparams,proto.is_vararg?'true':'false',proto.maxstack,syncStr].join(',')+'}';
+  return'{'+[codeStr,kStr,pStr,upStr,proto.numparams,proto.is_vararg?'true':'false',proto.maxstack,syncStr,proto.rkThreshold||128].join(',')+'}';
 }
 
 function encryptProtoString(plainStr,protoIdx,FENC_KEY,FENC_MUL,FENC_ADD){
@@ -1700,7 +1822,9 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     return Math.random()<0.5?expr+'%256':'bit32.band('+expr+',255)';
   }
   function polyMod16M(expr){
-    return Math.random()<0.5?expr+'%16777216':'bit32.band('+expr+',16777215)';
+    // Always use % — bit32.band truncates to 32 bits first, giving wrong results
+    // when intermediate values exceed 2^32 (e.g. chain*IMUT_SEED can reach ~2.8e14)
+    return expr+'%16777216';
   }
   function polyDiv256(expr){
     return Math.random()<0.5?'math.floor('+expr+'/256)':'bit32.rshift('+expr+',8)';
@@ -1921,7 +2045,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
      'pcall(function() _GENV.getfenv=function() return '+_envRef+' end end)',
      'pcall(function() _GENV.setfenv=function() end end)'],
     // Layer 36 : Environment Locking — rawequal cache for periodic integrity check
-    ['local '+_cachedFn+'=rawequal']
+    ['local '+_cachedFn+'=_GENV.rawequal']
   ];
   shuffle(initBlocks);
   for(var ib=0;ib<initBlocks.length;ib++){
@@ -1944,6 +2068,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+_envBit+'=0');
   lines.push('pcall(function() if type(game)=="userdata" then '+_envBit+'='+_envBit+'+1 end end)');
   lines.push('pcall(function() if type(workspace)=="userdata" then '+_envBit+'='+_envBit+'+2 end end)');
+  // ENV-GATE: silent — no debug output in production
   lines.push('local '+_envK+'=bit32.band('+_envBit+'*'+ENV_MULT+',255)');
   lines.push(R.EKA+'['+(ENV_IDX+1)+']=bit32.bxor('+R.EKA+'['+(ENV_IDX+1)+'],'+_envK+')');
   lines.push('local '+R.accLen+'=0');
@@ -1994,7 +2119,6 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('local '+R.OPDEC+'=setmetatable({},{__index=function(_,_k) return '+_hiddenName+'[_k] end})');
 
   // ─── Layer 27 : Anti-Tamper Layer C ────────────────────────────────────────
-  // OPDEC entry count check — XOR-corrupts hidden table with 255 on mismatch
   lines.push('do local _n=0 for _ in pairs('+_hiddenName+') do _n=_n+1 end');
   lines.push('if _n~='+opdecCount+' then');
   lines.push('  for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]=bit32.bxor('+_hiddenName+'[_k],255) end');
@@ -2136,9 +2260,9 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   if(MBA_TEMPLATE===0){
     mbaExpr='bit32.bor(_e[2],_mk)-bit32.band(_e[2],_mk)';
   }else if(MBA_TEMPLATE===1){
-    mbaExpr='bit32.band(bit32.bor(bit32.band(_e[2],bit32.bnot(_mk)),bit32.band(bit32.bnot(_e[2]),_mk)),16777215)';
+    mbaExpr='bit32.bor(bit32.band(_e[2],bit32.bnot(_mk)),bit32.band(bit32.bnot(_e[2]),_mk))';
   }else{
-    mbaExpr='bit32.band((_e[2]+_mk)-2*bit32.band(_e[2],_mk),16777215)';
+    mbaExpr='bit32.band((_e[2]+_mk)-2*bit32.band(_e[2],_mk),2147483647)';
   }
   lines.push('      local _v='+mbaExpr);
   lines.push('      rawset(_t,_i,_v) return _v');
@@ -2181,9 +2305,19 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  local '+R.code+'={} local '+_clen+'=#'+R.PROTO+'[1] for _ci=1,'+_clen+' do '+R.code+'[_ci]='+R.PROTO+'[1][_ci] end');
   lines.push('  local '+R.K+'='+_decK+'('+R.PROTO+'[2],'+kEncKeyExpr+','+kEncMulExpr+')');
   lines.push('  local '+R.P+'='+R.PROTO+'[3]');
+  // Per-proto RK threshold: shadows outer RK with per-function threshold from PROTO[9]
+  var _rkTh=rn();
+  lines.push('  local '+_rkTh+'='+R.PROTO+'[9]');
+  lines.push('  local '+R.RK+'=function(_R,_K,_v)');
+  lines.push('    if _v>='+_rkTh+' then return _K[_v-'+_rkTh+'+1] end');
+  lines.push('    local _r=_R[_v]');
+  lines.push('    if type(_r)=="table" and _r.__uv then return _r.val end');
+  lines.push('    return _r');
+  lines.push('  end');
   lines.push('  local '+R.REG+'={}');
   lines.push('  local '+R.pc+'=1');
   lines.push('  local '+R.top+'=0');
+  // (debug tracking removed)
   // ─── Layer 53 : Execution-Trace Chaining (runtime) ─────────────────────────
   // Chain state + sync table loaded from PROTO[8]
   var _syncTbl=rn(),_chainVar=rn(),_chainMult=rn(),_chainAdd=rn();
@@ -2231,6 +2365,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     return keyExtract[i]+'*'+multipliers[pos];
   });
   lines.push('    '+R.inst+'=bit32.bxor('+R.inst+','+maskTerms.join('+')+')');
+  // (debug field tracking removed)
   // Update chain with raw encoded instruction
   lines.push('    '+_chainVar+'='+polyMod16M('('+_chainVar+'*'+_chainMult+'+'+_rawInst+'+'+_chainAdd+')'));
   // Helper: generate inline chain-based IMUT unmutation for 2-word ops
@@ -2260,6 +2395,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('      for _k in pairs('+_hiddenName+') do '+_hiddenName+'[_k]='+_hiddenName+'[_k]+1 end');
   lines.push('    end');
   lines.push('    local '+R.op+'='+R.OPDEC+'[bit32.bxor('+fieldExpr(R.inst,0)+','+AOXR+')]');
+  // (debug op tracking removed)
   lines.push('    local '+R.a+'='+fieldExpr(R.inst,1));
   // Build handler array for dispatch diversification
   var handlers=[];
@@ -2619,6 +2755,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
 
   // Execute the root prototype
   lines.push(R.execute+'('+R.PROTO+',{},{})');
+
   // ─── Layer 35 : Build Watermark ───────────────────────────────────────────
   // Per-build BUILD_ID + BUILD_TS for leak tracing (referenced in dead handler)
   lines.push('local '+rn()+'='+encNum(BUILD_ID));
@@ -2680,9 +2817,9 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   fallbackLines.push('local _fn,_err=_ls('+open);
   fallbackLines.push(innerLines);
   fallbackLines.push(close+')');
-  fallbackLines.push('if not _fn then return end');
+  fallbackLines.push('if not _fn then print("LOADSTRING FAIL: "..tostring(_err)) return end');
   fallbackLines.push('local _ok,_e=pcall(_fn)');
-  fallbackLines.push('if not _ok then end');
+  fallbackLines.push('if not _ok then print("RUNTIME ERROR: "..tostring(_e)) end');
   return fallbackLines.join('\n');
 }
 
@@ -2817,9 +2954,9 @@ function lzwDecompressorLua(b64,outerEnvLines){
   lines.push('end');
   lines.push('local '+_src+'=table.concat('+_out+')');
   lines.push('local '+_fn+','+_err+'='+_ls+'('+_src+')');
-  lines.push('if not '+_fn+' then return end');
+  lines.push('if not '+_fn+' then print("LOADSTRING FAIL: "..tostring('+_err+')) return end');
   lines.push('local '+_ok+','+_e+'=pcall('+_fn+')');
-  lines.push('if not '+_ok+' then end');
+  lines.push('if not '+_ok+' then print("RUNTIME ERROR: "..tostring('+_e+')) end');
   return lines.join('\n');
 }
 
@@ -2835,6 +2972,8 @@ function obfuscateBytecodeVM(src){
   var MBA_TEMPLATE=Math.floor(Math.random()*3);
   // Compile AST to prototype
   var proto=bcCompileTopLevel(ast);
+  // Fix RK encoding for functions with maxstack > 128
+  fixRKEncoding(proto);
   // Fuse common instruction sequences into superoperators
   fuseInstructions(proto);
   // Inject garbage bytecode (dead instructions + opaque branches)
@@ -2895,7 +3034,7 @@ function obfuscateBytecodeVM(src){
   var FENC_ADD=Math.floor(Math.random()*254)+1;
   // ─── Layer 8 : Polymorphic IR (build-time keys) ───────────────────────────
   var IMUT_SEED=Math.floor(Math.random()*0xFFFFFF)+1;
-  var IMUT_MUL=Math.floor(Math.random()*900)+100;
+  var IMUT_MUL=Math.floor(Math.random()*0xFFFFFF)+1;
   // ─── Layer 53 : Execution-Trace Chaining (build-time keys) ───────────────
   var CHAIN_SEED=Math.floor(Math.random()*0xFFFFFF)+1;
   var CHAIN_MULT=(Math.floor(Math.random()*126)+1)*2+1; // odd, 3-253
