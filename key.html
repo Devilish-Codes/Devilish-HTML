@@ -221,7 +221,7 @@
 
 <script>
 const WORKER = "https://devilish-keys.devilish-codes.workers.dev";
-const LOOTLABS_URL = "https://lootdest.org/s?FvzGY6FE";
+const LOOTLABS_CP2_URL = "https://lootdest.org/s?FvzGY6FE";
 
 const params = new URLSearchParams(location.search);
 const userId = params.get("userId") || "";
@@ -391,7 +391,7 @@ $("btnExtLink").addEventListener("click", () => startSession("linkvertise", true
 
 $("btnCp2Loot").addEventListener("click", () => {
   try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
-  window.location.href = LOOTLABS_URL;
+  window.location.href = LOOTLABS_CP2_URL;
 });
 
 // ── Handle checkpoint returns ──
