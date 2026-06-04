@@ -229,6 +229,7 @@ async function startSession(svc, extend = false) {
     }
 
     currentSession = data.session;
+    try { localStorage.setItem("dvls_session", data.session); } catch (_) {}
     window.open(data.checkpointUrl, "_blank");
     setStatus("Complete the checkpoint in the new tab, then wait...", "polling");
 
@@ -267,8 +268,32 @@ $("btnLinkvertise").addEventListener("click", () => startSession("linkvertise"))
 $("btnExtLoot").addEventListener("click", () => startSession("lootlabs", true));
 $("btnExtLink").addEventListener("click", () => startSession("linkvertise", true));
 
-// ── Auto-start if parameters present ──
-if (userId && service && !isExtend) {
+// ── Handle return from Linkvertise (no server-side postback) ──
+const isCompleted = params.get("completed") === "1";
+if (isCompleted) {
+  (async () => {
+    let sess = null;
+    try { sess = localStorage.getItem("dvls_session"); } catch (_) {}
+    if (sess) {
+      setStatus("Verifying completion...", "polling");
+      try {
+        const r = await fetch(WORKER + "/api/postback?session=" + sess);
+        const d = await r.json();
+        if (d.ok && d.key) {
+          try { localStorage.removeItem("dvls_session"); } catch (_) {}
+          showKey(d.key, d.expiresAt);
+          setStatus(d.expiresAt ? "Key extended! +6 hours" : "Key obtained!", "success");
+        } else {
+          setStatus("Error: " + (d.error || "session not found"), "error");
+        }
+      } catch (e) {
+        setStatus("Network error: " + e.message, "error");
+      }
+    } else {
+      setStatus("No active session found. Try again from in-game.", "error");
+    }
+  })();
+} else if (userId && service && !isExtend) {
   startSession(service);
 } else if (userId && service && isExtend && extendKey) {
   showKey(extendKey);
