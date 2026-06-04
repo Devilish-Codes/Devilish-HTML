@@ -161,7 +161,6 @@
     border: 1px solid #20a040;
     color: #60e060;
   }
-  #cp2Section { display: none; }
 </style>
 </head>
 <body>
@@ -187,11 +186,10 @@
     <div class="checkpoint-msg partial" id="cpMsg" style="display:none"></div>
   </div>
 
-  <!-- Checkpoint 2 buttons (shown after checkpoint 1) -->
-  <div id="cp2Section">
+  <!-- Checkpoint 2 button — Loot Labs only (shown after checkpoint 1) -->
+  <div id="cp2Section" style="display:none">
     <div class="section-label">Complete Checkpoint 2</div>
     <button class="btn btn-lootlabs" id="btnCp2Loot">Continue via Loot Labs</button>
-    <button class="btn btn-linkvertise" id="btnCp2Link">Continue via Linkvertise</button>
   </div>
 
   <!-- Initial get key buttons -->
@@ -217,9 +215,7 @@
 
 <script>
 const WORKER = "https://devilish-keys.devilish-codes.workers.dev";
-
 const LOOTLABS_URL = "https://lootdest.org/s?FvzGY6FE";
-const LINKVERTISE_URL = "https://link-hub.net/2037098/Gt1GKVp0MwNt";
 
 const params = new URLSearchParams(location.search);
 const userId = params.get("userId") || "";
@@ -241,25 +237,23 @@ function setStatus(msg, cls) {
 
 function showKey(key, expiresAt) {
   currentKey = key;
-  const d = $("keyDisplay");
-  d.textContent = key;
-  d.classList.add("has-key");
+  $("keyDisplay").textContent = key;
+  $("keyDisplay").classList.add("has-key");
   $("btnCopy").disabled = false;
   $("btnExtLoot").disabled = false;
   $("btnExtLink").disabled = false;
   $("getKeySection").style.display = "none";
   $("cp2Section").style.display = "none";
   if (expiresAt) {
-    const dt = new Date(expiresAt * 1000);
-    $("expires").textContent = "Expires: " + dt.toLocaleString();
+    $("expires").textContent = "Expires: " + new Date(expiresAt * 1000).toLocaleString();
   }
 }
 
-function updateProgress(count) {
+function updateProgress(count, total) {
   $("cpProgress").style.display = "block";
-  const pct = (count / 2) * 100;
+  const pct = (count / total) * 100;
   $("cpBar").style.width = pct + "%";
-  $("cpBarText").textContent = "Checkpoint " + count + "/2";
+  $("cpBarText").textContent = "Checkpoint " + count + "/" + total;
 }
 
 function copyToClipboard(text) {
@@ -275,11 +269,6 @@ function copyToClipboard(text) {
       setStatus("Copied to clipboard!", "success");
     }
   );
-}
-
-function getCheckpointUrl(svc) {
-  if (svc === "lootlabs") return LOOTLABS_URL;
-  return LINKVERTISE_URL;
 }
 
 async function startSession(svc, extend = false) {
@@ -312,44 +301,24 @@ async function startSession(svc, extend = false) {
     currentSession = data.session;
     try {
       localStorage.setItem("dvls_session", data.session);
+      localStorage.setItem("dvls_service", svc);
       localStorage.setItem("dvls_checkpoint", "0");
     } catch (_) {}
 
     if (extend) {
-      // Extend = single checkpoint, no dual gate
-      window.open(data.checkpointUrl, "_blank");
-      setStatus("Complete the checkpoint in the new tab, then wait...", "polling");
-      pollTimer = setInterval(async () => {
-        try {
-          const pr = await fetch(WORKER + "/api/poll?session=" + currentSession);
-          const pd = await pr.json();
-          if (pd.completed && pd.key) {
-            clearInterval(pollTimer);
-            pollTimer = null;
-            showKey(pd.key);
-            setStatus("Key extended! +6 hours", "success");
-            try {
-              const vr = await fetch(WORKER + "/api/validate?key=" + pd.key + "&userId=" + userId);
-              const vd = await vr.json();
-              if (vd.expiresAt) $("expires").textContent = "Expires: " + new Date(vd.expiresAt * 1000).toLocaleString();
-            } catch (_) {}
-          }
-        } catch (_) {}
-      }, 3000);
+      // Extend = single checkpoint via Loot Labs, redirect in same tab
+      window.location.href = data.checkpointUrl;
+    } else if (svc === "linkvertise") {
+      // Linkvertise = single checkpoint, redirect in same tab
+      window.location.href = data.checkpointUrl;
     } else {
-      // New key = dual checkpoint
-      updateProgress(0);
+      // Loot Labs new key = dual checkpoint, redirect to checkpoint 1
       $("getKeySection").style.display = "none";
       window.location.href = data.checkpointUrl;
     }
   } catch (err) {
     setStatus("Network error: " + err.message, "error");
   }
-}
-
-function startCheckpoint2(svc) {
-  try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
-  window.location.href = getCheckpointUrl(svc);
 }
 
 async function completeSession(sess) {
@@ -361,12 +330,8 @@ async function completeSession(sess) {
       try {
         localStorage.removeItem("dvls_session");
         localStorage.removeItem("dvls_checkpoint");
+        localStorage.removeItem("dvls_service");
       } catch (_) {}
-      updateProgress(2);
-      const msg = $("cpMsg");
-      msg.style.display = "block";
-      msg.className = "checkpoint-msg done";
-      msg.textContent = "Checkpoint 2/2 Completed!";
       showKey(d.key, d.expiresAt);
       setStatus("Key obtained! Copy it and paste in-game.", "success");
     } else {
@@ -386,17 +351,21 @@ $("btnLinkvertise").addEventListener("click", () => startSession("linkvertise"))
 $("btnExtLoot").addEventListener("click", () => startSession("lootlabs", true));
 $("btnExtLink").addEventListener("click", () => startSession("linkvertise", true));
 
-$("btnCp2Loot").addEventListener("click", () => startCheckpoint2("lootlabs"));
-$("btnCp2Link").addEventListener("click", () => startCheckpoint2("linkvertise"));
+$("btnCp2Loot").addEventListener("click", () => {
+  try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
+  window.location.href = LOOTLABS_URL;
+});
 
 // ── Handle checkpoint returns ──
 if (isCompleted) {
   (async () => {
     let sess = null;
     let cp = 0;
+    let svc = "";
     try {
       sess = localStorage.getItem("dvls_session");
       cp = parseInt(localStorage.getItem("dvls_checkpoint") || "0");
+      svc = localStorage.getItem("dvls_service") || "";
     } catch (_) {}
 
     if (!sess) {
@@ -404,24 +373,38 @@ if (isCompleted) {
       return;
     }
 
+    // Linkvertise = single checkpoint — complete immediately
+    if (svc === "linkvertise") {
+      $("getKeySection").style.display = "none";
+      await completeSession(sess);
+      return;
+    }
+
+    // Loot Labs checkpoint 1 done
     if (cp < 1) {
-      // Checkpoint 1 done
       try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
-      updateProgress(1);
+      updateProgress(1, 2);
       const msg = $("cpMsg");
       msg.style.display = "block";
       msg.className = "checkpoint-msg partial";
       msg.textContent = "Checkpoint 1/2 Completed!";
       $("getKeySection").style.display = "none";
+      $("extendSection").style.display = "none";
       $("cp2Section").style.display = "block";
       setStatus("Complete one more checkpoint to get your key.", "polling");
-    } else {
-      // Checkpoint 2 done
-      updateProgress(2);
-      $("getKeySection").style.display = "none";
-      $("cp2Section").style.display = "none";
-      await completeSession(sess);
+      return;
     }
+
+    // Loot Labs checkpoint 2 done
+    updateProgress(2, 2);
+    const msg = $("cpMsg");
+    msg.style.display = "block";
+    msg.className = "checkpoint-msg done";
+    msg.textContent = "Checkpoint 2/2 Completed!";
+    $("getKeySection").style.display = "none";
+    $("extendSection").style.display = "none";
+    $("cp2Section").style.display = "none";
+    await completeSession(sess);
   })();
 } else if (userId && service && !isExtend) {
   startSession(service);
