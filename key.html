@@ -328,55 +328,34 @@ async function startSession(svc, extend = false) {
   }
 }
 
-async function completeSession(sess) {
-  setStatus("Generating key...", "polling");
+function cleanupStorage() {
   try {
-    const r = await fetch(WORKER + "/api/postback?session=" + sess);
-    const d = await r.json();
-    if (d.ok && d.key) {
-      try {
-        localStorage.removeItem("dvls_session");
-        localStorage.removeItem("dvls_checkpoint");
-        localStorage.removeItem("dvls_service");
-        localStorage.removeItem("dvls_extend");
-      } catch (_) {}
-      showKey(d.key, d.expiresAt);
-      setStatus("Key obtained! Copy it and paste in-game.", "success");
-    } else {
-      setStatus("Error: " + (d.error || "session not found"), "error");
-    }
-  } catch (e) {
-    setStatus("Network error: " + e.message, "error");
-  }
+    localStorage.removeItem("dvls_session");
+    localStorage.removeItem("dvls_checkpoint");
+    localStorage.removeItem("dvls_service");
+    localStorage.removeItem("dvls_extend");
+  } catch (_) {}
 }
 
-async function completeExtendSession(sess) {
-  setStatus("Extending key...", "polling");
-  try {
-    const r = await fetch(WORKER + "/api/postback?session=" + sess);
-    const d = await r.json();
-    if (d.ok && d.key) {
-      try {
-        localStorage.removeItem("dvls_session");
-        localStorage.removeItem("dvls_checkpoint");
-        localStorage.removeItem("dvls_service");
-        localStorage.removeItem("dvls_extend");
-      } catch (_) {}
-      showKey(d.key, d.expiresAt);
-      const msg = $("cpMsg");
-      msg.style.display = "block";
-      msg.className = "checkpoint-msg extend";
-      msg.textContent = "+6 Hours added to your Key!";
-      $("cpProgress").style.display = "block";
-      $("cpBar").style.width = "100%";
-      $("cpBarText").textContent = "Extension Complete";
-      setStatus("Key extended! Your new expiry is shown below.", "success");
-    } else {
-      setStatus("Error: " + (d.error || "session not found"), "error");
+function pollClaim(sess, checkFn) {
+  let attempts = 0;
+  const max = 20;
+  setStatus("Verifying checkpoint...", "polling");
+  const tick = async () => {
+    try {
+      const r = await fetch(WORKER + "/api/claim?session=" + sess);
+      const d = await r.json();
+      if (d.error) { setStatus("Error: " + d.error, "error"); return; }
+      if (checkFn(d)) return;
+    } catch (_) {}
+    if (++attempts >= max) {
+      setStatus("Verification timed out. Complete the checkpoint and refresh.", "error");
+      return;
     }
-  } catch (e) {
-    setStatus("Network error: " + e.message, "error");
-  }
+    setStatus("Verifying... (" + (attempts * 3) + "s)", "polling");
+    setTimeout(tick, 3000);
+  };
+  tick();
 }
 
 // ── Button handlers ──
@@ -389,7 +368,8 @@ $("btnExtLoot").addEventListener("click", () => startSession("lootlabs", true));
 $("btnExtLink").addEventListener("click", () => startSession("linkvertise", true));
 
 $("btnCp2Loot").addEventListener("click", () => {
-  window.location.href = LOOTLABS_CP2_URL;
+  const sess = localStorage.getItem("dvls_session") || "";
+  window.location.href = LOOTLABS_CP2_URL + "&puid=" + sess;
 });
 
 // ── Handle checkpoint returns ──
@@ -413,41 +393,85 @@ if (completedStep > 0) {
     if (completedStep === 3 || isExtendSession) {
       $("getKeySection").style.display = "none";
       $("extendSection").style.display = "none";
-      await completeExtendSession(sess);
+      pollClaim(sess, (d) => {
+        if (d.ready) {
+          cleanupStorage();
+          showKey(d.key, d.expiresAt);
+          const msg = $("cpMsg");
+          msg.style.display = "block";
+          msg.className = "checkpoint-msg extend";
+          msg.textContent = "+6 Hours added to your Key!";
+          $("cpProgress").style.display = "block";
+          $("cpBar").style.width = "100%";
+          $("cpBarText").textContent = "Extension Complete";
+          setStatus("Key extended! Your new expiry is shown below.", "success");
+          return true;
+        }
+        return false;
+      });
       return;
     }
 
-    // Linkvertise = single checkpoint — complete immediately
+    // Linkvertise — auto-completes server-side
     if (svc === "linkvertise") {
       $("getKeySection").style.display = "none";
-      await completeSession(sess);
+      pollClaim(sess, (d) => {
+        if (d.ready) {
+          cleanupStorage();
+          showKey(d.key, d.expiresAt);
+          setStatus("Key obtained! Copy it and paste in-game.", "success");
+          return true;
+        }
+        return false;
+      });
       return;
     }
 
-    // Loot Labs checkpoint 1 done
+    // Loot Labs checkpoint 1 — verify via server
     if (completedStep === 1) {
-      updateProgress(1, 2);
-      const msg = $("cpMsg");
-      msg.style.display = "block";
-      msg.className = "checkpoint-msg partial";
-      msg.textContent = "Checkpoint 1/2 Completed!";
       $("getKeySection").style.display = "none";
       $("extendSection").style.display = "none";
-      $("cp2Section").style.display = "block";
-      setStatus("Complete one more checkpoint to get your key.", "polling");
+      pollClaim(sess, (d) => {
+        if (d.ready) {
+          cleanupStorage();
+          showKey(d.key, d.expiresAt);
+          updateProgress(2, 2);
+          setStatus("Key obtained! Copy it and paste in-game.", "success");
+          return true;
+        }
+        if (d.completed >= 1) {
+          updateProgress(1, 2);
+          const msg = $("cpMsg");
+          msg.style.display = "block";
+          msg.className = "checkpoint-msg partial";
+          msg.textContent = "Checkpoint 1/2 Verified!";
+          $("cp2Section").style.display = "block";
+          setStatus("Complete one more checkpoint to get your key.", "polling");
+          return true;
+        }
+        return false;
+      });
       return;
     }
 
-    // Loot Labs checkpoint 2 done
-    updateProgress(2, 2);
-    const msg = $("cpMsg");
-    msg.style.display = "block";
-    msg.className = "checkpoint-msg done";
-    msg.textContent = "Checkpoint 2/2 Completed!";
+    // Loot Labs checkpoint 2 — verify via server
     $("getKeySection").style.display = "none";
     $("extendSection").style.display = "none";
     $("cp2Section").style.display = "none";
-    await completeSession(sess);
+    pollClaim(sess, (d) => {
+      if (d.ready) {
+        cleanupStorage();
+        updateProgress(2, 2);
+        const msg = $("cpMsg");
+        msg.style.display = "block";
+        msg.className = "checkpoint-msg done";
+        msg.textContent = "Checkpoint 2/2 Verified!";
+        showKey(d.key, d.expiresAt);
+        setStatus("Key obtained! Copy it and paste in-game.", "success");
+        return true;
+      }
+      return false;
+    });
   })();
 } else if (userId && service && !isExtend) {
   startSession(service);
