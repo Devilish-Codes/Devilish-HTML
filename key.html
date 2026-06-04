@@ -161,6 +161,12 @@
     border: 1px solid #20a040;
     color: #60e060;
   }
+  .checkpoint-msg.extend {
+    background: #1a1a00;
+    border: 1px solid #b08020;
+    color: #f0d060;
+    font-size: 18px;
+  }
 </style>
 </head>
 <body>
@@ -303,6 +309,8 @@ async function startSession(svc, extend = false) {
       localStorage.setItem("dvls_session", data.session);
       localStorage.setItem("dvls_service", svc);
       localStorage.setItem("dvls_checkpoint", "0");
+      if (extend) localStorage.setItem("dvls_extend", "1");
+      else localStorage.removeItem("dvls_extend");
     } catch (_) {}
 
     if (extend) {
@@ -331,9 +339,39 @@ async function completeSession(sess) {
         localStorage.removeItem("dvls_session");
         localStorage.removeItem("dvls_checkpoint");
         localStorage.removeItem("dvls_service");
+        localStorage.removeItem("dvls_extend");
       } catch (_) {}
       showKey(d.key, d.expiresAt);
       setStatus("Key obtained! Copy it and paste in-game.", "success");
+    } else {
+      setStatus("Error: " + (d.error || "session not found"), "error");
+    }
+  } catch (e) {
+    setStatus("Network error: " + e.message, "error");
+  }
+}
+
+async function completeExtendSession(sess) {
+  setStatus("Extending key...", "polling");
+  try {
+    const r = await fetch(WORKER + "/api/postback?session=" + sess);
+    const d = await r.json();
+    if (d.ok && d.key) {
+      try {
+        localStorage.removeItem("dvls_session");
+        localStorage.removeItem("dvls_checkpoint");
+        localStorage.removeItem("dvls_service");
+        localStorage.removeItem("dvls_extend");
+      } catch (_) {}
+      showKey(d.key, d.expiresAt);
+      const msg = $("cpMsg");
+      msg.style.display = "block";
+      msg.className = "checkpoint-msg extend";
+      msg.textContent = "+6 Hours added to your Key!";
+      $("cpProgress").style.display = "block";
+      $("cpBar").style.width = "100%";
+      $("cpBarText").textContent = "Extension Complete";
+      setStatus("Key extended! Your new expiry is shown below.", "success");
     } else {
       setStatus("Error: " + (d.error || "session not found"), "error");
     }
@@ -362,14 +400,24 @@ if (isCompleted) {
     let sess = null;
     let cp = 0;
     let svc = "";
+    let isExtendSession = false;
     try {
       sess = localStorage.getItem("dvls_session");
       cp = parseInt(localStorage.getItem("dvls_checkpoint") || "0");
       svc = localStorage.getItem("dvls_service") || "";
+      isExtendSession = localStorage.getItem("dvls_extend") === "1";
     } catch (_) {}
 
     if (!sess) {
       setStatus("No active session found. Try again from in-game.", "error");
+      return;
+    }
+
+    // Extend = always single checkpoint, regardless of service
+    if (isExtendSession) {
+      $("getKeySection").style.display = "none";
+      $("extendSection").style.display = "none";
+      await completeExtendSession(sess);
       return;
     }
 
