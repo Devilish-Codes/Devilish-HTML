@@ -228,7 +228,7 @@ const userId = params.get("userId") || "";
 const service = params.get("service") || "";
 const isExtend = params.get("extend") === "1";
 const extendKey = params.get("key") || "";
-const isCompleted = params.get("completed") === "1";
+const completedStep = parseInt(params.get("completed") || "0");
 
 const $ = (id) => document.getElementById(id);
 let currentKey = extendKey || "";
@@ -308,7 +308,6 @@ async function startSession(svc, extend = false) {
     try {
       localStorage.setItem("dvls_session", data.session);
       localStorage.setItem("dvls_service", svc);
-      localStorage.setItem("dvls_checkpoint", "0");
       if (extend) localStorage.setItem("dvls_extend", "1");
       else localStorage.removeItem("dvls_extend");
     } catch (_) {}
@@ -390,20 +389,17 @@ $("btnExtLoot").addEventListener("click", () => startSession("lootlabs", true));
 $("btnExtLink").addEventListener("click", () => startSession("linkvertise", true));
 
 $("btnCp2Loot").addEventListener("click", () => {
-  try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
   window.location.href = LOOTLABS_CP2_URL;
 });
 
 // ── Handle checkpoint returns ──
-if (isCompleted) {
+if (completedStep > 0) {
   (async () => {
     let sess = null;
-    let cp = 0;
     let svc = "";
     let isExtendSession = false;
     try {
       sess = localStorage.getItem("dvls_session");
-      cp = parseInt(localStorage.getItem("dvls_checkpoint") || "0");
       svc = localStorage.getItem("dvls_service") || "";
       isExtendSession = localStorage.getItem("dvls_extend") === "1";
     } catch (_) {}
@@ -429,8 +425,7 @@ if (isCompleted) {
     }
 
     // Loot Labs checkpoint 1 done
-    if (cp < 1) {
-      try { localStorage.setItem("dvls_checkpoint", "1"); } catch (_) {}
+    if (completedStep === 1) {
       updateProgress(1, 2);
       const msg = $("cpMsg");
       msg.style.display = "block";
