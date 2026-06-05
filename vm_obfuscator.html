@@ -1638,6 +1638,52 @@ function injectGarbage(proto){
   proto.code=newCode;
 }
 
+// ─── Layer 54 : Control Flow Flattening ─────────────────────────────────────
+// Permutes code array randomly, builds successor table, converts jumps to absolute targets.
+function controlFlowFlattening(proto){
+  for(var i=0;i<proto.p.length;i++)controlFlowFlattening(proto.p[i]);
+  var N=proto.code.length;
+  if(N<=1){proto.cff=false;return;}
+  // Fisher-Yates permutation: perm[oldPos] = newPos
+  var perm=[];
+  for(var i=0;i<N;i++)perm.push(i);
+  for(var i=N-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var t=perm[i];perm[i]=perm[j];perm[j]=t;
+  }
+  var oldToNew=perm;
+  var newToOld=new Array(N);
+  for(var i=0;i<N;i++)newToOld[oldToNew[i]]=i;
+  // Convert jump sBx to absolute targets in OLD code (before permutation)
+  var jumpOps=[BC.JMP,BC.FORLOOP,BC.FORPREP,BC.TFORLOOP];
+  for(var pc=0;pc<N;pc++){
+    var inst=proto.code[pc];
+    var op=inst&0xFF;
+    if(jumpOps.indexOf(op)>=0){
+      var a=(inst>>8)&0xFF;
+      var sBx=((inst>>16)&0xFFFF)-32767;
+      var oldTarget=pc+1+sBx; // 0-indexed target
+      if(oldTarget<0)oldTarget=0;
+      if(oldTarget>=N)oldTarget=N-1;
+      var newTarget=oldToNew[oldTarget]+1; // 1-indexed for Lua runtime
+      proto.code[pc]=bcEncodeBx(op,a,newTarget);
+    }
+  }
+  // Permute code array
+  var newCode=new Array(N);
+  for(var pc=0;pc<N;pc++)newCode[oldToNew[pc]]=proto.code[pc];
+  proto.code=newCode;
+  // Build successor table (0-indexed JS): succTable[newPos] = next newPos
+  var succTable=new Array(N);
+  for(var old=0;old<N-1;old++){
+    succTable[oldToNew[old]]=oldToNew[old+1];
+  }
+  // Last instruction has no successor (RETURN exits)
+  proto.succTable=succTable;
+  proto.startPC=oldToNew[0]; // 0-indexed
+  proto.cff=true;
+}
+
 // ─── Layer 1 : Polymorphic Opcode Aliases ───────────────────────────────────
 // Layer 2 : Opcode Pool Shuffling (Fisher-Yates on pool of integers)
 // Layer 3 : Dead Opcode Injection (20 dummy opcode values in pool)
@@ -1684,21 +1730,39 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
   // ─── Layer 53 : Execution-Trace Chaining (build-time) ──────────────────────
   // Identify jump targets, compute sync values, encode instructions with chained IMUT key
   var jumpTargets={};
-  jumpTargets[1]=true; // entry point
+  var _cffEntry=proto.cff?(proto.startPC+1):1;
+  jumpTargets[_cffEntry]=true; // entry point (1-indexed)
   for(var ji=0;ji<proto.code.length;ji++){
     var jinst=proto.code[ji];
     var jop=jinst&0xFF;
     var jpc=ji+1;
     if(jop===BC.JMP||jop===BC.FORLOOP||jop===BC.FORPREP||jop===BC.TFORLOOP){
-      var jsBx=((jinst>>16)&0xFFFF)-32767;
-      var jtarget=jpc+1+jsBx; // +1 because runtime pc is already incremented before dispatch
-      if(jtarget>=1&&jtarget<=proto.code.length)jumpTargets[jtarget]=true;
+      if(proto.cff){
+        // CFF: BX field is absolute target (1-indexed)
+        var jbx=((jinst>>16)&0xFFFF);
+        if(jbx>=1&&jbx<=proto.code.length)jumpTargets[jbx]=true;
+      }else{
+        var jsBx=((jinst>>16)&0xFFFF)-32767;
+        var jtarget=jpc+1+jsBx;
+        if(jtarget>=1&&jtarget<=proto.code.length)jumpTargets[jtarget]=true;
+      }
     }
     if(jop===BC.EQ||jop===BC.LT||jop===BC.LE||jop===BC.TEST||jop===BC.TESTSET){
-      if(jpc+2<=proto.code.length)jumpTargets[jpc+2]=true;
+      if(proto.cff){
+        // Skip-next: 2 ahead in execution order via successor table
+        var _sn=proto.succTable[ji];
+        if(_sn!==undefined){var _sn2=proto.succTable[_sn];if(_sn2!==undefined)jumpTargets[_sn2+1]=true;}
+      }else{
+        if(jpc+2<=proto.code.length)jumpTargets[jpc+2]=true;
+      }
     }
     if(jop===BC.LOADBOOL&&((jinst>>>24)&0xFF)!==0){
-      if(jpc+2<=proto.code.length)jumpTargets[jpc+2]=true;
+      if(proto.cff){
+        var _sn3=proto.succTable[ji];
+        if(_sn3!==undefined){var _sn4=proto.succTable[_sn3];if(_sn4!==undefined)jumpTargets[_sn4+1]=true;}
+      }else{
+        if(jpc+2<=proto.code.length)jumpTargets[jpc+2]=true;
+      }
     }
   }
   // Compute deterministic sync values for each jump target
@@ -1708,9 +1772,20 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
     syncTable[stpc]=((CHAIN_SEED*stpc+CHAIN_ADD)&0xFFFFFF);
   }
   // Encode instructions with chained IMUT key (Layer 53)
+  // Build encoding order: successor-table order for CFF, sequential otherwise
+  var encOrder=[];
+  if(proto.cff){
+    var _ep=proto.startPC,_ev={};
+    while(_ep!==undefined&&_ep>=0&&_ep<proto.code.length&&!_ev[_ep]){
+      _ev[_ep]=true;encOrder.push(_ep);_ep=proto.succTable[_ep];
+    }
+  }else{
+    for(var _ei2=0;_ei2<proto.code.length;_ei2++)encOrder.push(_ei2);
+  }
   var encCode=new Array(proto.code.length);
-  var chain=syncTable[1];
-  for(var ei=0;ei<proto.code.length;ei++){
+  var chain=syncTable[encOrder[0]+1];
+  for(var _oi=0;_oi<encOrder.length;_oi++){
+    var ei=encOrder[_oi];
     var pc1=ei+1;
     if(syncTable[pc1]!==undefined)chain=syncTable[pc1];
     var mutKey=((chain*IMUT_SEED+IMUT_MUL)%16777216);
@@ -1781,7 +1856,17 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
   var pStr='{'+pParts.join(',')+'}';
   // Upvalue descriptors
   var upStr='{'+proto.updescs.map(function(d){return'{'+(d.instack?1:0)+','+d.idx+'}';}).join(',')+'}';
-  return'{'+[codeStr,kStr,pStr,upStr,proto.numparams,proto.is_vararg?'true':'false',proto.maxstack,syncStr,proto.rkThreshold||128].join(',')+'}';
+  // Serialize successor table and startPC for CFF (PROTO[10], PROTO[11])
+  var succStr='nil',startStr='nil';
+  if(proto.cff){
+    var succParts=[];
+    for(var si=0;si<proto.code.length;si++){
+      succParts.push(proto.succTable[si]!==undefined?(proto.succTable[si]+1):0);
+    }
+    succStr='{'+succParts.join(',')+'}';
+    startStr=String(proto.startPC+1); // 1-indexed for Lua
+  }
+  return'{'+[codeStr,kStr,pStr,upStr,proto.numparams,proto.is_vararg?'true':'false',proto.maxstack,syncStr,proto.rkThreshold||128,succStr,startStr].join(',')+'}';
 }
 
 function encryptProtoString(plainStr,protoIdx,FENC_KEY,FENC_MUL,FENC_ADD){
@@ -2271,9 +2356,8 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('end');
 
   // Layer 37 : Obfuscated magic numbers (128, 32767 stored via encNum)
-  var _rk128=rn(),_sbx32767=rn();
+  var _rk128=rn();
   lines.push('local '+_rk128+'='+encNum(128));
-  lines.push('local '+_sbx32767+'='+encNum(32767));
 
   // ─── Layer 31 : Cell-Aware Register Helpers ────────────────────────────────
   // _rget/_rset/RK transparently unwrap upvalue cells ({val=X, __uv=true})
@@ -2325,6 +2409,10 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   lines.push('  local '+_chainVar+'=0');
   lines.push('  local '+_chainMult+'='+chainMultExpr);
   lines.push('  local '+_chainAdd+'='+chainAddExpr);
+  // ─── Layer 54 : Control Flow Flattening (runtime) ────────────────────────
+  var _succTbl=rn(),_curPC=rn();
+  lines.push('  local '+_succTbl+'='+R.PROTO+'[10]');
+  lines.push('  local '+_curPC+'=0');
   // Load varargs into register -1 position conceptually (accessible via VARARG instruction)
   lines.push('  local _VA='+R.varargs+' or {}');
   // Load params from varargs into R[0..numparams-1]
@@ -2345,7 +2433,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   // Layer 53 : Sync chain at jump targets, then compute IMUT key from chain state
   var _rawInst=rn(),_svTmp=rn();
   lines.push('    local '+_rawInst+'='+R.inst);
-  lines.push('    local '+_svTmp+'='+_syncTbl+'['+R.pc+'-1]');
+  lines.push('    local '+_svTmp+'='+_syncTbl+'['+_curPC+']');
   lines.push('    if '+_svTmp+' then '+_chainVar+'='+_svTmp+' end');
   // ─── Layer 8 : Polymorphic IR ──────────────────────────────────────────────
   // Non-opcode bytes XOR'd with PC-derived rolling key (chain-based)
@@ -2411,7 +2499,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   // LOADBOOL
   handlers.push({cond:R.op+'=='+BC.LOADBOOL,body:[
     '      '+_rset+'('+R.REG+','+R.a+','+fieldExpr(R.inst,2)+'~=0)',
-    '      if '+fieldExpr(R.inst,3)+'~=0 then '+R.pc+'='+R.pc+'+1 end'
+    '      if '+fieldExpr(R.inst,3)+'~=0 then '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1) end'
   ]});
   // LOADNIL
   handlers.push({cond:R.op+'=='+BC.LOADNIL,body:[
@@ -2492,36 +2580,35 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      for _i=_b+1,_c do _s=_s..tostring('+_rget+'('+R.REG+',_i)) end',
     '      '+_rset+'('+R.REG+','+R.a+',_s)'
   ]});
-  // JMP
+  // JMP (CFF: absolute target via BX)
   handlers.push({cond:R.op+'=='+BC.JMP,body:[
-    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
-    '      '+R.pc+'='+R.pc+'+_sbx'
+    '      '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256'
   ]});
   // EQ
   handlers.push({cond:R.op+'=='+BC.EQ,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      if('+R.RK+'('+R.REG+','+R.K+',_b)=='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+R.pc+'+1 end'
+    '      if('+R.RK+'('+R.REG+','+R.K+',_b)=='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1) end'
   ]});
   // LT
   handlers.push({cond:R.op+'=='+BC.LT,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<'+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+R.pc+'+1 end'
+    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<'+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1) end'
   ]});
   // LE
   handlers.push({cond:R.op+'=='+BC.LE,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
-    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+R.pc+'+1 end'
+    '      if('+R.RK+'('+R.REG+','+R.K+',_b)<='+R.RK+'('+R.REG+','+R.K+',_c))~=('+R.a+'~=0) then '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1) end'
   ]});
   // TEST
   handlers.push({cond:R.op+'=='+BC.TEST,body:[
     '      local _c='+fieldExpr(R.inst,3),
-    '      if(not '+_rget+'('+R.REG+','+R.a+'))==(_c~=0) then '+R.pc+'='+R.pc+'+1 end'
+    '      if(not '+_rget+'('+R.REG+','+R.a+'))==(_c~=0) then '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1) end'
   ]});
   // TESTSET
   handlers.push({cond:R.op+'=='+BC.TESTSET,body:[
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
     '      local _bv='+_rget+'('+R.REG+',_b)',
-    '      if(not _bv)==(_c~=0) then '+R.pc+'='+R.pc+'+1 else '+_rset+'('+R.REG+','+R.a+',_bv) end'
+    '      if(not _bv)==(_c~=0) then '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1) else '+_rset+'('+R.REG+','+R.a+',_bv) end'
   ]});
   // CALL
   handlers.push({cond:R.op+'=='+BC.CALL,body:[
@@ -2566,16 +2653,14 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      '+_rset+'('+R.REG+','+R.a+',_nv)',
     '      local _limit='+_rget+'('+R.REG+','+R.a+'+1)',
     '      if(_step>0 and _nv<=_limit)or(_step<0 and _nv>=_limit) then',
-    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
-    '        '+R.pc+'='+R.pc+'+_sbx',
+    '        '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256',
     '        '+_rset+'('+R.REG+','+R.a+'+3,_nv)',
     '      end'
   ]});
   // FORPREP
   handlers.push({cond:R.op+'=='+BC.FORPREP,body:[
     '      '+_rset+'('+R.REG+','+R.a+','+_rget+'('+R.REG+','+R.a+')-'+_rget+'('+R.REG+','+R.a+'+2))',
-    '      local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
-    '      '+R.pc+'='+R.pc+'+_sbx'
+    '      '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256'
   ]});
   // TFORCALL
   handlers.push({cond:R.op+'=='+BC.TFORCALL,body:[
@@ -2588,8 +2673,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _v1='+_rget+'('+R.REG+','+R.a+'+1)',
     '      if _v1~=nil then',
     '        '+_rset+'('+R.REG+','+R.a+',_v1)',
-    '        local _sbx='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256-'+_sbx32767,
-    '        '+R.pc+'='+R.pc+'+_sbx',
+    '        '+R.pc+'='+fieldExpr(R.inst,2)+'+'+fieldExpr(R.inst,3)+'*256',
     '      end'
   ]});
   // SETLIST
@@ -2682,7 +2766,7 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
   var sgImut=genImutUnmask('_dw');
   handlers.push({cond:R.op+'=='+BC.SUPER_GCALL,body:[
     '      local _dw='+R.code+'['+R.pc+']',
-    '      '+R.pc+'='+R.pc+'+1',
+    '      '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1)',
   ].concat(sgImut).concat([
     '      local _bx='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
     '      local _fn=_GENV['+R.K+'[_bx+1]]',
@@ -2745,9 +2829,12 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     lines.push('  end');
   }
   // Main loop — same for both dispatch variants
+  // Layer 54 CFF: start at PROTO[11] (startPC), advance via successor table PROTO[10]
+  lines.push('  '+R.pc+'='+R.PROTO+'[11] or 1');
   lines.push('  while true do');
+  lines.push('    '+_curPC+'='+R.pc);
   lines.push('    local '+_tmpVar+'='+R.code+'['+R.pc+']');
-  lines.push('    '+R.pc+'='+R.pc+'+1');
+  lines.push('    '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1)');
   lines.push('    local '+_rvVar+'='+R.dispatch+'('+_tmpVar+')');
   lines.push('    if '+_rvVar+'~=nil then return table.unpack('+_rvVar+',1,'+_rvVar+'.n) end');
   lines.push('  end');
@@ -2978,6 +3065,8 @@ function obfuscateBytecodeVM(src){
   fuseInstructions(proto);
   // Inject garbage bytecode (dead instructions + opaque branches)
   injectGarbage(proto);
+  // Control flow flattening (permute code, successor table, absolute jumps)
+  controlFlowFlattening(proto);
   // String dedup
   var _strMap=new Map(),_strArr=[];
   function encStr(s){
