@@ -1997,7 +1997,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
    'dI','dJ','dR','ki','tCk','tI','tJ',
    'EAST','dkAST','dpAST','PROTO','GENV','RT'
   ].forEach(function(n){R[n]=rn();});
-  // Layer 57: Per-VM execute function names (forward-declared)
+  // Layer 56: Per-VM execute function names (forward-declared)
   var execNames=[rn(),rn()];
 
   // ─── Layer 11 : Stateful String Encryption ─────────────────────────────────
@@ -2016,7 +2016,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
   var HMUL=(Math.floor(Math.random()*126)+1)*2+1;
   var HADD=Math.floor(Math.random()*254)+1;
 
-  // ─── Layer 5 : OPDEC Lookup Table (Layer 57: dual tables) ────────────────
+  // ─── Layer 5 : OPDEC Lookup Table (Layer 56: dual tables) ────────────────
   // Maps XOR'd(random_op) → canonical index — one per VM
   var opKeys=Object.keys(BC);
   var opdecEntriesArr=[[],[]];
@@ -2080,7 +2080,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
   // Feed keys into tamper checksum
   for(var ti=0;ti<keyA.length;ti++)_tChk=(_tChk*TMUL+keyA[ti]+1)%TMOD;
   for(var ti2=0;ti2<keyB.length;ti2++)_tChk=(_tChk*TMUL+keyB[ti2]+1)%TMOD;
-  // Feed OPDEC entries from BOTH VMs into tamper checksum (Layer 57)
+  // Feed OPDEC entries from BOTH VMs into tamper checksum (Layer 56)
   var opdecPairsArr=[[],[]];
   for(var _tvi=0;_tvi<2;_tvi++){
     var _top=VM[_tvi].OPMAP;
@@ -2271,7 +2271,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
     lines.push('end');
   }
 
-  // ─── Layer 6 : Metatable-Based OPDEC (Layer 57: dual tables) ──────────────
+  // ─── Layer 6 : Metatable-Based OPDEC (Layer 56: dual tables) ──────────────
   // Two hidden tables with __index metatables — one per VM
   var _hiddenNames=[rn(),rn()];
   var _opdecNames=[rn(),rn()];
@@ -2304,7 +2304,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
   lines.push('for '+R.tI+'=1,#'+R.EKB+' do');
   lines.push('  '+R.tCk+'='+polyMod16M('('+R.tCk+'*'+TMUL+'+'+R.EKB+'['+R.tI+']+1)'));
   lines.push('end');
-  // Hash BOTH OPDEC tables (Layer 57)
+  // Hash BOTH OPDEC tables (Layer 56)
   for(var _avi=0;_avi<2;_avi++){
     lines.push('do local _ks={} for '+R.tI+' in pairs('+_hiddenNames[_avi]+') do _ks[#_ks+1]='+R.tI+' end table.sort(_ks)');
     lines.push('for _,'+R.tI+' in ipairs(_ks) do');
@@ -2391,7 +2391,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
   lines.push('local '+_fmName+'='+fencMulExpr);
   lines.push('local '+_faName+'='+fencAddExpr);
 
-  // Layer 8 / Layer 57 : Polymorphic IR keys — two pairs (one per VM)
+  // Layer 8 / Layer 56 : Polymorphic IR keys — two pairs (one per VM)
   var _imSeedNames=[rn(),rn()],_imMulNames=[rn(),rn()];
   for(var _imvi=0;_imvi<2;_imvi++){
     lines.push('local '+_imSeedNames[_imvi]+'='+encNum(VM[_imvi].IMUT_SEED));
@@ -2461,7 +2461,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
   lines.push('  return _r');
   lines.push('end');
 
-  // ─── Layer 57 : Dual VM — forward-declare both execute functions ──────────
+  // ─── Layer 56 : Dual VM — forward-declare both execute functions ──────────
   lines.push('local '+execNames[0]+','+execNames[1]);
   // Generate two execute functions with independent per-VM parameters
   for(var _vmi=0;_vmi<2;_vmi++){
@@ -3005,7 +3005,7 @@ function generateBytecodeVM(VM,protoStr,strArr,STDLIB,rtKeys,kEncKeyExpr,kEncMul
   lines.push('    if '+_rvVar+'~=nil then return table.unpack('+_rvVar+',1,'+_rvVar+'.n) end');
   lines.push('  end');
   lines.push('end');
-  } // end Layer 57 dual VM loop
+  } // end Layer 56 dual VM loop
 
   // Execute the root prototype — route based on PROTO[12] vmId
   lines.push('if '+R.PROTO+'[12]==0 then '+execNames[0]+'('+R.PROTO+',{},{}) else '+execNames[1]+'('+R.PROTO+',{},{}) end');
@@ -3233,7 +3233,7 @@ function obfuscateBytecodeVM(src){
   injectGarbage(proto);
   // Control flow flattening (permute code, successor table, absolute jumps)
   controlFlowFlattening(proto);
-  // ─── Layer 57 : Dual VM Architecture ──────────────────────────────────────
+  // ─── Layer 56 : Dual VM Architecture ──────────────────────────────────────
   // Assign each prototype to VM-0 or VM-1 randomly
   function assignVmIds(p){p.vmId=Math.floor(Math.random()*2);for(var i=0;i<p.p.length;i++)assignVmIds(p.p[i]);}
   assignVmIds(proto);
@@ -3276,7 +3276,7 @@ function obfuscateBytecodeVM(src){
       }
     }
   }
-  // ─── Layer 57 : Dual VM — Two independent parameter sets ──────────────────
+  // ─── Layer 56 : Dual VM — Two independent parameter sets ──────────────────
   var VM=[];
   for(var _vi=0;_vi<2;_vi++){
     var fo=[0,1,2,3];
