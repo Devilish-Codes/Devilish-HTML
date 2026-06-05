@@ -513,9 +513,10 @@ var BC={
   SETLIST:36,CLOSURE:37,VARARG:38,
   BAND:39,BOR:40,BXOR:41,SHL:42,SHR:43,BNOT:44,
   NOP:45,CLOSE:46,
-  SUPER_MRET:47,SUPER_KRET:48,SUPER_GCALL:49
+  SUPER_MRET:47,SUPER_KRET:48,SUPER_GCALL:49,
+  SUPER_SELF_CALL:50,SUPER_TEST_JMP:51,SUPER_GETTAB_CALL:52
 };
-var BC_COUNT=50;
+var BC_COUNT=53;
 var GARBAGE_OP=255;
 
 function bcEncode(op,a,b,c){return(op&0xFF)|((a&0xFF)<<8)|((b&0xFF)<<16)|((c&0xFF)<<24);}
@@ -1421,6 +1422,7 @@ function fuseInstructions(proto){
   if(len<2) return;
   // Build protected set: skip-next positions + jump targets
   var protectedFuse=new Set();
+  var jumpTargetOnly=new Set(); // Layer 55: separate set for external jump targets only
   var jumpOps=[BC.JMP,BC.FORLOOP,BC.FORPREP,BC.TFORLOOP];
   for(var pc=0;pc<len;pc++){
     var inst=code[pc];
@@ -1436,7 +1438,7 @@ function fuseInstructions(proto){
       if(op===jumpOps[ji]){
         var sbx=((inst>>16)&0xFFFF)-32767;
         var target=pc+1+sbx;
-        if(target>=0&&target<=len) protectedFuse.add(target);
+        if(target>=0&&target<=len){protectedFuse.add(target);jumpTargetOnly.add(target);}
         break;
       }
     }
@@ -1445,6 +1447,11 @@ function fuseInstructions(proto){
   var fuseAt=new Set();
   var pc=0;
   while(pc<len){
+    // Layer 55: TEST+JMP — bypass TEST's self-protection but NOT if JMP is an external jump target
+    if(pc+1<len&&!jumpTargetOnly.has(pc+1)){
+      var _ti=code[pc],_ti2=code[pc+1];
+      if((_ti&0xFF)===BC.TEST&&(_ti2&0xFF)===BC.JMP){fuseAt.add(pc);pc+=2;continue;}
+    }
     if(protectedFuse.has(pc)){pc++;continue;}
     if(pc+1<len&&!protectedFuse.has(pc+1)){
       var inst=code[pc],inst2=code[pc+1];
@@ -1453,10 +1460,23 @@ function fuseInstructions(proto){
       if(op===BC.MOVE&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
       if(op===BC.LOADK&&op2===BC.RETURN&&a2===a&&((inst2>>16)&0xFF)===2){fuseAt.add(pc);pc+=2;continue;}
       if(op===BC.GETGLOBAL&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
+      if(op===BC.SELF&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
+      if(op===BC.GETTABLE&&op2===BC.CALL&&a2===a){fuseAt.add(pc);pc+=2;continue;}
     }
     pc++;
   }
   if(fuseAt.size===0) return;
+  // Diagnostic: count fusions by type
+  var _fuseCounts={MRET:0,KRET:0,GCALL:0,SELF_CALL:0,TEST_JMP:0,GETTAB_CALL:0};
+  fuseAt.forEach(function(fpc){var fop=code[fpc]&0xFF;
+    if(fop===BC.MOVE)_fuseCounts.MRET++;
+    else if(fop===BC.LOADK)_fuseCounts.KRET++;
+    else if(fop===BC.GETGLOBAL)_fuseCounts.GCALL++;
+    else if(fop===BC.SELF)_fuseCounts.SELF_CALL++;
+    else if(fop===BC.TEST)_fuseCounts.TEST_JMP++;
+    else if(fop===BC.GETTABLE)_fuseCounts.GETTAB_CALL++;
+  });
+  console.log('  fuseInstructions: '+JSON.stringify(_fuseCounts)+' ('+fuseAt.size+' total)');
   // Build old→new PC mapping
   var oldToNew=new Array(len+1);
   var newPc=0;
@@ -1465,7 +1485,7 @@ function fuseInstructions(proto){
     oldToNew[pc]=newPc;
     if(fuseAt.has(pc)){
       var op=(code[pc]&0xFF);
-      if(op===BC.GETGLOBAL) newPc+=2; else newPc+=1;
+      if(op===BC.GETGLOBAL||op===BC.SELF||op===BC.TEST||op===BC.GETTABLE) newPc+=2; else newPc+=1;
       oldToNew[pc+1]=newPc; // second instruction maps to after the fused output
       pc+=2;
     }else{
@@ -1486,10 +1506,23 @@ function fuseInstructions(proto){
       }else if(op===BC.LOADK){
         var bx=(inst>>16)&0xFFFF;
         newCode.push(bcEncode(BC.SUPER_KRET,a,bx&0xFF,(bx>>8)&0xFF));
-      }else{ // GETGLOBAL+CALL
+      }else if(op===BC.GETGLOBAL){ // GETGLOBAL+CALL
         var bx2=(inst>>16)&0xFFFF;
         newCode.push(bcEncode(BC.SUPER_GCALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
         newCode.push(bcEncode(0,0,bx2&0xFF,(bx2>>8)&0xFF));
+      }else if(op===BC.SELF){ // SELF+CALL
+        newCode.push(bcEncode(BC.SUPER_SELF_CALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
+        newCode.push(bcEncode(0,0,(inst>>16)&0xFF,(inst>>24)&0xFF));
+      }else if(op===BC.TEST){ // TEST+JMP
+        var jmpSbx=((inst2>>16)&0xFFFF)-32767;
+        var jmpOldTarget=pc+2+jmpSbx;
+        var jmpNewTarget=oldToNew[jmpOldTarget];
+        var newSbx=jmpNewTarget-(oldToNew[pc]+2);
+        newCode.push(bcEncode(BC.SUPER_TEST_JMP,a,(inst>>24)&0xFF,0));
+        newCode.push(bcEncodesBx(0,0,newSbx));
+      }else if(op===BC.GETTABLE){ // GETTABLE+CALL
+        newCode.push(bcEncode(BC.SUPER_GETTAB_CALL,a,(inst2>>16)&0xFF,(inst2>>24)&0xFF));
+        newCode.push(bcEncode(0,0,(inst>>16)&0xFF,(inst>>24)&0xFF));
       }
       pc+=2;
     }else{
@@ -1531,7 +1564,7 @@ function injectGarbage(proto){
     if(op===BC.LOADBOOL&&((inst>>24)&0xFF)!==0){
       protectedPos.add(pc+1);
     }
-    if(op===BC.SUPER_GCALL){
+    if(op===BC.SUPER_GCALL||op===BC.SUPER_SELF_CALL||op===BC.SUPER_TEST_JMP||op===BC.SUPER_GETTAB_CALL){
       protectedPos.add(pc+1);
     }
   }
@@ -1616,6 +1649,14 @@ function injectGarbage(proto){
         break;
       }
     }
+    // Layer 55: SUPER_TEST_JMP word 2 at pc+1 also contains sBx jump target
+    if(op===BC.SUPER_TEST_JMP){
+      var w2=proto.code[pc+1];
+      var w2sbx=((w2>>16)&0xFFFF)-32767;
+      var w2oldTarget=(pc+1)+1+w2sbx;
+      var w2newSbx=newPC(w2oldTarget)-newPC(pc+1)-1;
+      proto.code[pc+1]=bcEncodesBx(0,0,w2newSbx);
+    }
   }
   // Build new code array with insertions spliced in
   var newCode=[];
@@ -1668,6 +1709,16 @@ function controlFlowFlattening(proto){
       var newTarget=oldToNew[oldTarget]+1; // 1-indexed for Lua runtime
       proto.code[pc]=bcEncodeBx(op,a,newTarget);
     }
+    // Layer 55: SUPER_TEST_JMP word 2 at pc+1 contains sBx jump target
+    if(op===BC.SUPER_TEST_JMP){
+      var w2=proto.code[pc+1];
+      var sBx2=((w2>>16)&0xFFFF)-32767;
+      var oldTarget2=(pc+1)+1+sBx2;
+      if(oldTarget2<0)oldTarget2=0;
+      if(oldTarget2>=N)oldTarget2=N-1;
+      var newTarget2=oldToNew[oldTarget2]+1;
+      proto.code[pc+1]=bcEncodeBx(0,0,newTarget2);
+    }
   }
   // Permute code array
   var newCode=new Array(N);
@@ -1691,7 +1742,7 @@ function controlFlowFlattening(proto){
 function genBytecodeOpcodeMap(){
   var ALIAS_PER=3;  // Layer 1: 3 random aliases per opcode
   var DEAD_COUNT=20; // Layer 3: 20 dummy opcode values
-  var totalOps=BC_COUNT*(1+ALIAS_PER)+DEAD_COUNT+30;
+  var totalOps=Math.min(BC_COUNT*(1+ALIAS_PER)+DEAD_COUNT+30,255);
   // Shuffle pool
   var pool=[];
   for(var i=1;i<=totalOps;i++)pool.push(i);
@@ -1716,7 +1767,7 @@ function genBytecodeOpcodeMap(){
     for(var ai=0;ai<ALIAS_PER;ai++)OP_ALIASES[name].push(pool[pi2++]);
   }
   var DEAD=[];
-  for(var di=0;di<DEAD_COUNT;di++)DEAD.push(pool[pi2++]);
+  for(var di=0;di<DEAD_COUNT&&pi2<pool.length;di++)DEAD.push(pool[pi2++]);
   return{OP:OP,OP_ALIASES:OP_ALIASES,DEAD:DEAD};
 }
 
@@ -1745,6 +1796,22 @@ function bcSerializePrototype(proto,encStr,encNum,OPMAP,AOXR,FIELD_ORDER,KENC_KE
         var jsBx=((jinst>>16)&0xFFFF)-32767;
         var jtarget=jpc+1+jsBx;
         if(jtarget>=1&&jtarget<=proto.code.length)jumpTargets[jtarget]=true;
+      }
+    }
+    // Layer 55: SUPER_TEST_JMP contains a jump target in word 2
+    if(jop===BC.SUPER_TEST_JMP){
+      if(proto.cff){
+        var _stw2pos=proto.succTable[ji];
+        if(_stw2pos!==undefined){
+          var _stw2=proto.code[_stw2pos];
+          var _stbx=((_stw2>>16)&0xFFFF);
+          if(_stbx>=1&&_stbx<=proto.code.length)jumpTargets[_stbx]=true;
+        }
+      }else{
+        var _stw2n=proto.code[ji+1];
+        var _stsbx=((_stw2n>>16)&0xFFFF)-32767;
+        var _sttgt=(ji+2)+1+_stsbx;
+        if(_sttgt>=1&&_sttgt<=proto.code.length)jumpTargets[_sttgt]=true;
       }
     }
     if(jop===BC.EQ||jop===BC.LT||jop===BC.LE||jop===BC.TEST||jop===BC.TESTSET){
@@ -2771,6 +2838,66 @@ function generateBytecodeVM(OPMAP,protoStr,strArr,AOXR,FIELD_ORDER,STDLIB,rtKeys
     '      local _bx='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
     '      local _fn=_GENV['+R.K+'[_bx+1]]',
     '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
+    '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
+    '      local _as={}',
+    '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
+    '      local _rv=table.pack(pcall(_fn,table.unpack(_as,1,_na)))',
+    '      if not _rv[1] then error(_rv[2],0) end',
+    '      if _c==0 then',
+    '        for _i=2,_rv.n do '+_rset+'('+R.REG+','+R.a+'+_i-2,_rv[_i]) end',
+    '        '+R.top+'='+R.a+'+_rv.n-2',
+    '      else',
+    '        for _i=1,_c-1 do '+_rset+'('+R.REG+','+R.a+'+_i-1,_rv[_i+1]) end',
+    '      end'
+  ])});
+
+  // ─── Layer 55 : Extended Superoperator handlers (SUPER_SELF_CALL, SUPER_TEST_JMP, SUPER_GETTAB_CALL)
+  // SUPER_SELF_CALL: SELF + CALL fused (2-word)
+  var sscImut=genImutUnmask('_dw');
+  handlers.push({cond:R.op+'=='+BC.SUPER_SELF_CALL,body:[
+    '      local _dw='+R.code+'['+R.pc+']',
+    '      '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1)',
+  ].concat(sscImut).concat([
+    '      local _selfB='+fieldExpr('_dw',2),
+    '      local _selfC='+fieldExpr('_dw',3),
+    '      local _obj='+_rget+'('+R.REG+',_selfB)',
+    '      '+_rset+'('+R.REG+','+R.a+'+1,_obj)',
+    '      '+_rset+'('+R.REG+','+R.a+',_obj['+R.RK+'('+R.REG+','+R.K+',_selfC)])',
+    '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
+    '      local _fn='+_rget+'('+R.REG+','+R.a+')',
+    '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
+    '      local _as={}',
+    '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
+    '      local _rv=table.pack(pcall(_fn,table.unpack(_as,1,_na)))',
+    '      if not _rv[1] then error(_rv[2],0) end',
+    '      if _c==0 then',
+    '        for _i=2,_rv.n do '+_rset+'('+R.REG+','+R.a+'+_i-2,_rv[_i]) end',
+    '        '+R.top+'='+R.a+'+_rv.n-2',
+    '      else',
+    '        for _i=1,_c-1 do '+_rset+'('+R.REG+','+R.a+'+_i-1,_rv[_i+1]) end',
+    '      end'
+  ])});
+  // SUPER_TEST_JMP: TEST + JMP fused (2-word, conditional jump)
+  var stjImut=genImutUnmask('_dw');
+  handlers.push({cond:R.op+'=='+BC.SUPER_TEST_JMP,body:[
+    '      local _dw='+R.code+'['+R.pc+']',
+    '      '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1)',
+  ].concat(stjImut).concat([
+    '      local _bx='+fieldExpr('_dw',2)+'+'+fieldExpr('_dw',3)+'*256',
+    '      local _c='+fieldExpr(R.inst,2),
+    '      if(not '+_rget+'('+R.REG+','+R.a+'))~=(_c~=0) then '+R.pc+'=_bx end'
+  ])});
+  // SUPER_GETTAB_CALL: GETTABLE + CALL fused (2-word)
+  var gtcImut=genImutUnmask('_dw');
+  handlers.push({cond:R.op+'=='+BC.SUPER_GETTAB_CALL,body:[
+    '      local _dw='+R.code+'['+R.pc+']',
+    '      '+R.pc+'='+_succTbl+'['+R.pc+'] or('+R.pc+'+1)',
+  ].concat(gtcImut).concat([
+    '      local _gtB='+fieldExpr('_dw',2),
+    '      local _gtC='+fieldExpr('_dw',3),
+    '      '+_rset+'('+R.REG+','+R.a+','+_rget+'('+R.REG+',_gtB)['+R.RK+'('+R.REG+','+R.K+',_gtC)])',
+    '      local _b='+fieldExpr(R.inst,2)+' local _c='+fieldExpr(R.inst,3),
+    '      local _fn='+_rget+'('+R.REG+','+R.a+')',
     '      local _na=_b==0 and('+R.top+'-'+R.a+')or(_b-1)',
     '      local _as={}',
     '      for _i=1,_na do _as[_i]='+_rget+'('+R.REG+','+R.a+'+_i) end',
