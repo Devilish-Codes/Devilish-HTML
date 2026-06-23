@@ -1,0 +1,1467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Clicker Value List</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+--bg-base:#050816;--bg-surface:#0a0f24;--bg-elevated:#111836;
+--glass:rgba(255,255,255,0.04);--glass-hover:rgba(255,255,255,0.08);--glass-border:rgba(255,255,255,0.06);
+--accent-300:#d8b4fe;--accent-400:#c084fc;--accent-500:#a855f7;--accent-600:#9333ea;--accent-700:#7c3aed;
+--text-1:#f1f5f9;--text-2:#94a3b8;--text-3:#4b5563;--border:rgba(255,255,255,0.08);
+--shadow-glow:0 0 30px rgba(168,85,247,0.15);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg-base);color:var(--text-1);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background:linear-gradient(rgba(255,255,255,0.015) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.015) 1px,transparent 1px);background-size:60px 60px;mask-image:radial-gradient(ellipse 80% 60% at 50% 50%,black 30%,transparent 100%);pointer-events:none;z-index:0;}
+
+/* Floating orbs */
+.orb{position:fixed;border-radius:50%;filter:blur(80px);opacity:0.3;pointer-events:none;z-index:0;}
+.orb-1{width:420px;height:420px;background:radial-gradient(circle,#7c3aed,transparent 70%);top:-120px;left:-120px;animation:orb1 18s ease-in-out infinite;}
+.orb-2{width:350px;height:350px;background:radial-gradient(circle,#6366f1,transparent 70%);top:45%;right:-100px;animation:orb2 22s ease-in-out infinite;}
+.orb-3{width:300px;height:300px;background:radial-gradient(circle,#a855f7,transparent 70%);bottom:-60px;left:35%;animation:orb3 20s ease-in-out infinite;}
+@keyframes orb1{0%,100%{transform:translate(0,0)}33%{transform:translate(70px,90px)}66%{transform:translate(-40px,50px)}}
+@keyframes orb2{0%,100%{transform:translate(0,0)}33%{transform:translate(-60px,-70px)}66%{transform:translate(35px,-35px)}}
+@keyframes orb3{0%,100%{transform:translate(0,0)}33%{transform:translate(50px,-55px)}66%{transform:translate(-65px,25px)}}
+
+/* Header */
+.site-header{position:sticky;top:0;z-index:100;backdrop-filter:blur(24px);background:rgba(5,8,22,0.75);border-bottom:1px solid var(--glass-border);padding:0 max(1.5rem,4%);}
+.header-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:20px;height:64px;}
+.logo{display:flex;align-items:center;gap:8px;cursor:default;-webkit-user-select:none;user-select:none;flex-shrink:0;}
+.logo-icon{font-size:22px;}
+.logo-text{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;}
+.gradient-text{background:linear-gradient(90deg,#c084fc,#818cf8,#60a5fa,#c084fc);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:gradShift 6s linear infinite;}
+@keyframes gradShift{to{background-position:200% center}}
+
+.nav-tabs{display:flex;align-items:center;gap:2px;flex:1;overflow:visible;scrollbar-width:none;}
+.nav-tabs::-webkit-scrollbar{display:none;}
+.nav-tab{background:none;border:none;color:var(--text-2);font-family:'Inter',sans-serif;font-weight:500;font-size:13px;padding:8px 14px;border-radius:10px;cursor:pointer;transition:all .2s;white-space:nowrap;}
+.nav-tab:hover,.nav-tab.active{color:var(--text-1);background:var(--glass-hover);}
+.nav-tab.active{color:var(--accent-400);}
+.nav-dd{position:relative;}
+.nav-dd-menu{display:none;position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);background:rgba(10,15,36,0.95);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:14px;padding:6px;min-width:180px;z-index:200;box-shadow:0 12px 40px rgba(0,0,0,0.5);}
+.nav-dd-menu.open{display:block;}
+.nav-dd-menu button{display:flex;align-items:center;gap:10px;width:100%;background:none;border:none;color:var(--text-2);font-family:'Inter',sans-serif;font-size:13px;padding:9px 14px;border-radius:10px;cursor:pointer;transition:all .15s;}
+.nav-dd-menu button:hover{background:var(--glass-hover);color:var(--text-1);}
+.rarity-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.header-search{position:relative;flex-shrink:0;}
+.header-search input{background:var(--glass);border:1px solid var(--border);border-radius:10px;padding:8px 14px 8px 36px;color:var(--text-1);font-size:13px;width:200px;outline:none;transition:border-color .2s;font-family:'Inter',sans-serif;}
+.header-search input:focus{border-color:var(--accent-700);}
+.header-search input::placeholder{color:var(--text-3);}
+.header-search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--text-3);}
+
+/* Main */
+.main{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:32px max(1.5rem,4%);}
+
+/* Hero */
+.hero{text-align:center;padding:56px 0 20px;}
+.hero-title{font-family:'Space Grotesk',sans-serif;font-size:clamp(2.5rem,1.5rem+4vw,4rem);font-weight:700;letter-spacing:-.03em;line-height:1.1;}
+.hero-sub{color:var(--text-2);font-size:15px;max-width:440px;margin:14px auto 32px;line-height:1.6;}
+.hero-stats{display:flex;justify-content:center;gap:48px;margin-bottom:36px;}
+.hero-stat-num{font-family:'Space Grotesk',sans-serif;font-size:28px;font-weight:700;color:var(--accent-400);display:block;}
+.hero-stat-label{font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;}
+.hero-search{position:relative;max-width:440px;margin:0 auto;}
+.hero-search input{width:100%;background:var(--glass);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:14px;padding:14px 18px 14px 44px;color:var(--text-1);font-size:15px;outline:none;transition:border-color .2s;font-family:'Inter',sans-serif;}
+.hero-search input:focus{border-color:var(--accent-700);box-shadow:var(--shadow-glow);}
+.hero-search input::placeholder{color:var(--text-3);}
+.hero-search svg{position:absolute;left:15px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--text-3);}
+
+/* Rarity grid */
+.rarity-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:28px;max-width:640px;margin-left:auto;margin-right:auto;}
+.rarity-card{display:flex;align-items:center;gap:12px;padding:14px 18px;background:var(--glass);backdrop-filter:blur(12px);border:1px solid var(--glass-border);border-radius:14px;cursor:pointer;transition:all .25s cubic-bezier(.16,1,.3,1);color:var(--text-1);font-family:'Inter',sans-serif;font-weight:500;font-size:14px;}
+.rarity-card:hover{background:var(--glass-hover);border-color:rgba(192,132,252,.3);transform:translateY(-2px);box-shadow:var(--shadow-glow);}
+.rarity-card .rarity-dot{width:10px;height:10px;}
+.rarity-card-count{margin-left:auto;color:var(--text-3);font-size:13px;}
+
+/* Page */
+.page{display:none;}
+.page.active{display:block;}
+#homePage{position:relative;}
+
+/* List header */
+.list-header{display:flex;align-items:center;gap:14px;margin-bottom:20px;}
+.list-header h2{font-family:'Space Grotesk',sans-serif;font-size:clamp(1.25rem,1rem+1vw,1.75rem);font-weight:700;display:flex;align-items:center;gap:10px;}
+.rarity-dot-lg{width:14px;height:14px;border-radius:50%;flex-shrink:0;}
+.pet-count{margin-left:auto;color:var(--text-3);font-size:13px;}
+.sort-dd{position:relative;margin-left:8px;}
+.sort-btn{background:var(--glass);border:1px solid var(--border);color:var(--text-2);font-family:'Inter',sans-serif;font-weight:500;font-size:12px;padding:6px 12px;border-radius:10px;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px;white-space:nowrap;}
+.sort-btn:hover{background:var(--glass-hover);color:var(--text-1);}
+.sort-btn svg{width:14px;height:14px;}
+.sort-menu{display:none;position:absolute;top:calc(100% + 6px);right:0;background:rgba(10,15,36,0.95);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:12px;padding:4px;min-width:170px;z-index:200;box-shadow:0 12px 40px rgba(0,0,0,0.5);}
+.sort-menu.open{display:block;}
+.sort-menu button{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;color:var(--text-2);font-family:'Inter',sans-serif;font-size:12px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:all .15s;}
+.sort-menu button:hover{background:var(--glass-hover);color:var(--text-1);}
+.sort-menu button.active{color:var(--accent-400);}
+
+/* Pet card grid */
+.pet-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;}
+.pet-card{position:relative;background:var(--glass);backdrop-filter:blur(12px);border:1px solid var(--glass-border);border-radius:16px;padding:18px 16px 14px;cursor:pointer;transition:all .3s cubic-bezier(.16,1,.3,1);overflow:hidden;}
+.pet-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(168,85,247,.06),rgba(99,102,241,.03));opacity:0;transition:opacity .3s;border-radius:16px;pointer-events:none;}
+.pet-card:hover{border-color:rgba(192,132,252,.3);transform:translateY(-4px);box-shadow:0 12px 40px rgba(168,85,247,.1);}
+.pet-card:hover::before{opacity:1;}
+.pet-card-icon{width:60px;height:60px;border-radius:12px;background:var(--bg-surface);border:1px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;}
+.pet-card-icon img{width:100%;height:100%;object-fit:contain;}
+.pet-card-name{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14px;color:var(--text-1);text-align:center;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pet-card-values{display:flex;justify-content:center;gap:10px;}
+.pcv{text-align:center;}
+.pcv-label{display:block;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;}
+.pcv-val{font-size:12px;font-weight:600;color:var(--text-2);}
+.pet-card-demand{text-align:center;margin-top:6px;font-size:12px;}
+.pet-card-info{position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:var(--text-3);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;font-family:'Inter',sans-serif;}
+.pet-card:hover .pet-card-info{opacity:1;}
+.pet-card-info:hover{background:rgba(255,255,255,0.12);color:var(--accent-400);}
+.pet-card-del{position:absolute;top:8px;left:8px;width:22px;height:22px;border-radius:50%;background:rgba(220,38,38,0.15);border:1px solid rgba(220,38,38,0.3);color:#f87171;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;font-family:'Inter',sans-serif;}
+.pet-card:hover .pet-card-del{opacity:1;}
+.pet-card-del:hover{background:rgba(220,38,38,0.3);}
+
+/* Search results */
+.search-header{color:var(--text-2);font-size:14px;margin-bottom:16px;}
+.search-header strong{color:var(--accent-400);}
+.no-results{color:var(--text-3);text-align:center;padding:40px 0;}
+
+/* Modal overlay */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(10px);z-index:500;display:flex;align-items:center;justify-content:center;padding:20px;animation:fadeIn .2s ease;}
+.modal{background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:32px;max-width:620px;width:100%;max-height:90vh;overflow-y:auto;position:relative;animation:slideUp .35s cubic-bezier(.16,1,.3,1);}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+.modal-close{position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-3);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;font-family:'Inter',sans-serif;}
+.modal-close:hover{background:rgba(255,255,255,0.12);color:#fff;}
+
+/* Pet detail in modal */
+.pet-detail-header{display:flex;gap:20px;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;}
+.pet-detail-icon{width:120px;height:120px;border-radius:20px;background:var(--bg-surface);border:2px solid var(--border);overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.pet-detail-icon img{width:100%;height:100%;object-fit:contain;}
+.pet-meta h2{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;margin:0 0 8px;}
+.pet-meta p{margin:4px 0;color:var(--text-2);font-size:13px;}
+.pet-meta .pet-desc{color:var(--text-3);font-style:italic;font-size:12px;line-height:1.5;margin-top:8px;}
+
+.pet-values{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;}
+.pet-val-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:12px;padding:12px 20px;text-align:center;flex:1;min-width:90px;}
+.val-label{font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;}
+.val-num{font-size:18px;font-weight:700;color:var(--text-1);margin-top:4px;}
+
+.calc-section{background:var(--bg-surface);border:1px solid var(--border);border-radius:14px;padding:18px;margin-top:16px;}
+.calc-section h3{font-family:'Space Grotesk',sans-serif;color:var(--accent-400);margin:0 0 14px;font-size:15px;font-weight:600;}
+.calc-row{margin-bottom:12px;}
+.calc-row>label{display:block;color:var(--text-2);font-size:12px;margin-bottom:5px;}
+input[type="range"]{-webkit-appearance:none;width:100%;height:5px;border-radius:3px;background:var(--bg-base);outline:none;margin:0;}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent-500);border:2px solid var(--accent-300);cursor:pointer;box-shadow:0 0 8px rgba(168,85,247,.3);}
+.calc-checks{display:flex;flex-wrap:wrap;gap:10px;}
+.calc-checks label{display:flex;align-items:center;gap:5px;color:var(--text-1);font-size:12px;cursor:pointer;}
+.calc-results{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;}
+.stat-card{background:var(--bg-base);border:1px solid var(--border);border-radius:10px;padding:10px 16px;text-align:center;flex:1;min-width:70px;}
+.stat-label{font-size:11px;color:var(--text-3);}
+.stat-num{font-size:16px;font-weight:700;color:var(--accent-300);margin-top:3px;}
+#multBreakdown{color:var(--text-3);font-size:11px;margin-top:6px;}
+
+/* Info popup */
+.info-popup{position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);z-index:600;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s;}
+.info-bubble{background:var(--bg-elevated);border:1px solid var(--border);border-radius:20px;padding:24px 28px;max-width:420px;width:90%;position:relative;animation:slideUp .3s cubic-bezier(.16,1,.3,1);}
+.info-bubble h3{margin:0 0 8px;color:var(--accent-400);font-family:'Space Grotesk',sans-serif;font-size:16px;}
+.info-bubble .info-status{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:bold;margin-bottom:10px;}
+.info-status.obtainable{background:#065f46;color:#6ee7b7;}
+.info-status.unobtainable{background:#7f1d1d;color:#fca5a5;}
+.info-status.limited{background:#78350f;color:#fcd34d;}
+.info-status.leaderboard{background:#312e81;color:#a5b4fc;}
+.info-status.robux{background:#4c1d95;color:#c4b5fd;}
+.info-bubble p{margin:8px 0 0;font-size:13px;color:var(--text-2);line-height:1.5;}
+.info-bubble .info-close{position:absolute;top:10px;right:14px;background:none;border:none;color:var(--text-3);font-size:18px;cursor:pointer;padding:0;}
+.info-bubble .info-close:hover{color:#fff;}
+
+/* Admin panel */
+.admin-panel{position:fixed;top:0;right:0;width:360px;height:100%;background:rgba(10,15,36,0.96);backdrop-filter:blur(24px);border-left:1px solid rgba(192,132,252,0.2);padding:24px;overflow-y:auto;z-index:700;transform:translateX(100%);transition:transform .4s cubic-bezier(.16,1,.3,1);}
+.admin-panel.open{transform:translateX(0);}
+.admin-panel h3{font-family:'Space Grotesk',sans-serif;color:var(--accent-400);font-size:16px;margin:0 0 16px;}
+.admin-panel input,.admin-panel select{width:100%;padding:10px 14px;margin-top:8px;border-radius:10px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-1);font-family:'Inter',sans-serif;font-size:13px;outline:none;transition:border-color .2s;}
+.admin-panel input:focus,.admin-panel select:focus{border-color:var(--accent-700);}
+.admin-panel input::placeholder{color:var(--text-3);}
+.admin-btn{background:var(--accent-700);color:#fff;border:none;padding:10px 16px;border-radius:10px;cursor:pointer;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;width:100%;margin-top:10px;transition:background .2s;}
+.admin-btn:hover{background:var(--accent-600);}
+.admin-btn.danger{background:#dc2626;}
+.admin-btn.danger:hover{background:#ef4444;}
+.admin-btn.teal{background:#0d9488;font-size:11px;padding:8px 12px;}
+
+/* Home editor */
+.home-editor{position:fixed;top:64px;left:0;width:380px;height:calc(100% - 64px);background:rgba(10,15,36,0.96);backdrop-filter:blur(24px);border-right:1px solid rgba(192,132,252,0.2);padding:20px;overflow-y:auto;z-index:700;transform:translateX(-100%);transition:transform .4s cubic-bezier(.16,1,.3,1);}
+.home-editor.open{transform:translateX(0);}
+.home-editor h3{font-family:'Space Grotesk',sans-serif;color:var(--accent-400);font-size:15px;margin:0 0 14px;display:flex;align-items:center;justify-content:space-between;}
+.home-editor label{display:block;color:var(--text-2);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:12px 0 4px;}
+.home-editor input,.home-editor textarea{width:100%;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-1);font-family:'Inter',sans-serif;font-size:13px;outline:none;transition:border-color .2s;}
+.home-editor input:focus,.home-editor textarea:focus{border-color:var(--accent-700);}
+.home-editor textarea{resize:vertical;min-height:60px;line-height:1.5;}
+.home-editor input::placeholder,.home-editor textarea::placeholder{color:var(--text-3);}
+.he-row{display:flex;gap:8px;}
+.he-row>div{flex:1;}
+.he-banner-preview{margin:8px 0;padding:10px 14px;border-radius:10px;background:var(--glass);border:1px solid var(--glass-border);color:var(--text-2);font-size:12px;min-height:20px;white-space:pre-wrap;word-break:break-word;}
+.he-actions{display:flex;gap:8px;margin-top:16px;}
+.he-actions button{flex:1;}
+
+/* Text boxes */
+.tb-container{position:absolute;inset:0;pointer-events:none;z-index:5;}
+.text-box{position:absolute;min-width:80px;min-height:30px;color:#fff;font-family:'Inter',sans-serif;font-size:14px;line-height:1.5;word-break:break-word;white-space:pre-wrap;pointer-events:auto;}
+.text-box.editing{outline:1px dashed var(--accent-400);z-index:10;}
+.text-box.editing .tb-body{cursor:text;}
+.text-box.editing .tb-handle{cursor:move;}
+.text-box.editing:hover{outline-color:var(--accent-300);}
+.tb-handle{position:absolute;top:-28px;left:0;right:0;display:none;background:rgba(10,15,36,0.92);border:1px solid var(--accent-700);border-radius:8px 8px 0 0;padding:2px 6px;font-size:0;white-space:nowrap;z-index:11;}
+.text-box.editing .tb-handle{display:flex;align-items:center;gap:2px;}
+.tb-handle button,.tb-handle select{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:var(--text-2);border-radius:4px;cursor:pointer;font-size:11px;padding:2px 4px;height:22px;font-family:'Inter',sans-serif;transition:background .15s;}
+.tb-handle button:hover{background:rgba(255,255,255,0.18);color:#fff;}
+.tb-handle button.active{background:var(--accent-700);color:#fff;}
+.tb-handle select{padding:1px 2px;appearance:none;-webkit-appearance:none;min-width:60px;text-align:center;}
+.tb-handle input[type="color"]{width:22px;height:22px;border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:0;cursor:pointer;background:transparent;}
+.tb-resize{position:absolute;bottom:-4px;right:-4px;width:12px;height:12px;background:var(--accent-500);border:2px solid var(--bg-base);border-radius:2px;cursor:nwse-resize;display:none;z-index:12;}
+.text-box.editing .tb-resize{display:block;}
+.tb-del{margin-left:auto!important;background:rgba(220,38,38,0.3)!important;border-color:rgba(220,38,38,0.5)!important;color:#f87171!important;}
+
+/* Text box list in editor */
+.he-tb-list{margin-top:8px;display:flex;flex-direction:column;gap:4px;}
+.he-tb-item{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--glass);border:1px solid var(--glass-border);border-radius:8px;font-size:12px;color:var(--text-2);cursor:pointer;transition:all .15s;}
+.he-tb-item:hover{background:var(--glass-hover);color:var(--text-1);}
+.he-tb-item .tb-item-del{margin-left:auto;background:none;border:none;color:var(--text-3);cursor:pointer;font-size:14px;padding:0 2px;}
+.he-tb-item .tb-item-del:hover{color:#f87171;}
+.admin-btn.teal:hover{background:#14b8a6;}
+.admin-close{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-3);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.admin-close:hover{color:#fff;background:rgba(255,255,255,0.1);}
+.name-wrap{position:relative;}
+#nameSuggestions{position:absolute;top:100%;left:0;right:0;background:var(--bg-elevated);border:1px solid var(--border);border-radius:0 0 10px 10px;max-height:160px;overflow-y:auto;z-index:200;display:none;}
+#nameSuggestions div{padding:8px 14px;cursor:pointer;font-size:12px;color:var(--text-2);}
+#nameSuggestions div:hover{background:var(--glass-hover);color:var(--text-1);}
+
+/* Reveal animation */
+@keyframes revealUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.reveal{opacity:0;animation:revealUp .5s cubic-bezier(.16,1,.3,1) forwards;}
+
+/* Icon effects */
+@keyframes rainbowHue{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(360deg)}}
+@keyframes shinyPulse{0%,100%{box-shadow:0 0 8px 2px rgba(255,215,0,.3)}50%{box-shadow:0 0 20px 6px rgba(255,215,0,.6)}}
+.icon-rainbow{animation:rainbowHue 2s linear infinite;}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(168,85,247,0.25);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(168,85,247,0.4);}
+
+/* Responsive */
+@media(max-width:768px){
+.header-inner{gap:10px;}
+.nav-tabs{gap:0;overflow-x:auto;overflow-y:visible;}
+.nav-tab{font-size:12px;padding:6px 10px;}
+.header-search input{width:140px;}
+.pet-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;}
+.pet-card{padding:14px 12px 10px;}
+.pet-card-icon{width:48px;height:48px;}
+.hero-title{font-size:clamp(1.8rem,1rem+3vw,3rem);}
+.hero-stats{gap:24px;}
+.modal{padding:16px;border-radius:20px;max-height:85vh;}
+.modal-overlay{padding:10px;align-items:flex-end;}
+.admin-panel{width:100%;}
+.home-editor{width:100%;}
+.mobile-edit-home{display:block!important;margin-bottom:12px;}
+.rarity-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));max-width:none;}
+.sort-menu{right:auto;left:0;}
+.tb-handle{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.text-box{max-width:calc(100vw - 32px);}
+}
+@media(max-width:480px){
+.pet-grid{grid-template-columns:repeat(2,1fr);gap:8px;}
+.hero-stats{gap:16px;flex-wrap:wrap;}
+.hero-stat-num{font-size:22px;}
+.header-search{display:none;}
+.hero-search input{font-size:14px;padding:12px 14px 12px 40px;}
+.rarity-grid{grid-template-columns:repeat(2,1fr);gap:8px;}
+.rarity-card{padding:10px 12px;font-size:13px;}
+.list-header{flex-wrap:wrap;gap:8px;}
+.pet-detail-header{flex-direction:column;align-items:center;text-align:center;}
+.pet-detail-icon{width:90px;height:90px;}
+.pet-values{flex-direction:column;}
+.calc-checks{flex-direction:column;gap:6px;}
+.nav-dd-menu{left:0;transform:none;}
+}
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<header class="site-header">
+<div class="header-inner">
+<div class="logo" id="logoArea">
+<span class="logo-icon">&#x1f43e;</span>
+<span class="logo-text gradient-text">Value List</span>
+</div>
+<nav class="nav-tabs">
+<button class="nav-tab active" data-page="home">Home</button>
+<button class="nav-tab" data-page="all">All Pets</button>
+<div class="nav-dd">
+<button class="nav-tab" id="rarityBtn">Rarity &#9662;</button>
+<div class="nav-dd-menu" id="rarityMenu"></div>
+</div>
+</nav>
+<div class="header-search">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+<input type="text" id="headerSearch" placeholder="Search pets...">
+</div>
+</div>
+</header>
+
+<div class="main">
+
+<!-- HOME -->
+<section id="homePage" class="page active">
+<div id="homeBanner" style="display:none;text-align:center;padding:12px 18px;margin-bottom:12px;background:linear-gradient(135deg,rgba(168,85,247,.12),rgba(99,102,241,.08));border:1px solid rgba(192,132,252,.2);border-radius:14px;color:var(--accent-300);font-size:14px;line-height:1.5;white-space:pre-wrap;"></div>
+<div class="hero">
+<h1 class="hero-title gradient-text" id="heroTitle">Clicker Sim<br>Value List</h1>
+<p class="hero-sub" id="heroSub">The definitive trading reference. Browse values, check stats, and master the market.</p>
+<div class="hero-stats" id="heroStats">
+<div><span class="hero-stat-num" id="totalPets">184</span><span class="hero-stat-label" id="stat1Label">Total Pets</span></div>
+<div><span class="hero-stat-num" id="stat2Num">9</span><span class="hero-stat-label" id="stat2Label">Rarities</span></div>
+<div><span class="hero-stat-num" id="stat3Num">3</span><span class="hero-stat-label" id="stat3Label">Variants</span></div>
+</div>
+<div class="hero-search">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+<input type="text" id="heroSearch" placeholder="Search for any pet...">
+</div>
+</div>
+<div class="tb-container" id="tbContainer"></div>
+<div class="rarity-grid" id="rarityGrid"></div>
+</section>
+
+<!-- LIST -->
+<section id="listPage" class="page">
+<div class="list-header">
+<h2><span class="rarity-dot-lg" id="rarityDot"></span><span id="rarityTitle" class="gradient-text"></span></h2>
+<span class="pet-count" id="listCount"></span>
+<div class="sort-dd">
+<button class="sort-btn" id="sortBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M6 12h12M9 18h6"/></svg>Sort</button>
+<div class="sort-menu" id="sortMenu">
+<button data-sort="name-az" class="active">Name A–Z</button>
+<button data-sort="name-za">Name Z–A</button>
+<button data-sort="value-high">Value High–Low</button>
+<button data-sort="value-low">Value Low–High</button>
+<button data-sort="demand-high">Demand High–Low</button>
+<button data-sort="demand-low">Demand Low–High</button>
+</div>
+</div>
+</div>
+<div class="pet-grid" id="petGrid"></div>
+</section>
+
+<!-- ALL PETS -->
+<section id="allPage" class="page">
+<div class="list-header">
+<h2><span class="gradient-text">All Pets</span></h2>
+<span class="pet-count" id="allCount"></span>
+<div class="sort-dd">
+<button class="sort-btn" id="sortBtnAll"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M6 12h12M9 18h6"/></svg>Sort</button>
+<div class="sort-menu" id="sortMenuAll">
+<button data-sort="name-az" class="active">Name A–Z</button>
+<button data-sort="name-za">Name Z–A</button>
+<button data-sort="value-high">Value High–Low</button>
+<button data-sort="value-low">Value Low–High</button>
+<button data-sort="demand-high">Demand High–Low</button>
+<button data-sort="demand-low">Demand Low–High</button>
+</div>
+</div>
+</div>
+<div class="pet-grid" id="allGrid"></div>
+</section>
+
+<!-- SEARCH -->
+<section id="searchPage" class="page">
+<p class="search-header" id="searchHeader"></p>
+<div class="pet-grid" id="searchGrid"></div>
+<p class="no-results" id="noResults" style="display:none;">No pets found.</p>
+</section>
+
+</div>
+
+<!-- PET DETAIL MODAL -->
+<div class="modal-overlay" id="petModal" style="display:none;">
+<div class="modal">
+<button class="modal-close" id="modalClose">&times;</button>
+<div class="pet-detail-header">
+<div class="pet-detail-icon" id="petIconWrap">
+<img id="petIcon" src="" alt="" style="display:none;">
+</div>
+<div class="pet-meta">
+<h2 id="petNameTitle" class="gradient-text"></h2>
+<p>Rarity: <strong id="petRarityLabel"></strong></p>
+<p id="petDemandLine"></p>
+<p id="petStatusLine"></p>
+<p id="petDescLine" class="pet-desc"></p>
+</div>
+</div>
+<div class="pet-values" id="petValuesRow"></div>
+<div class="calc-section">
+<h3>Stat Calculator</h3>
+<div class="calc-row">
+<label>Level: <strong id="levelDisplay">0</strong></label>
+<input type="range" id="levelSlider" min="0" max="50" value="0">
+</div>
+<div class="calc-row">
+<label>Variant</label>
+<div class="calc-checks">
+<label><input type="radio" name="variant" value="Normal" checked> Normal</label>
+<label><input type="radio" name="variant" value="Golden"> Golden</label>
+<label><input type="radio" name="variant" value="Rainbow"> Rainbow</label>
+</div>
+</div>
+<div class="calc-row">
+<label>Shiny</label>
+<div class="calc-checks"><label><input type="checkbox" id="shinyCheck"> Shiny (1.25&times;)</label></div>
+</div>
+<div class="calc-row">
+<label>Mutations</label>
+<div class="calc-checks">
+<label><input type="checkbox" class="mut-check" value="Wet"> Wet (1.25&times;)</label>
+<label><input type="checkbox" class="mut-check" value="Bloodmoon"> Bloodmoon (1.4&times;)</label>
+<label><input type="checkbox" class="mut-check" value="Thunderstorm"> Thunderstorm (1.4&times;)</label>
+<label><input type="checkbox" class="mut-check" value="UpsideDown"> UpsideDown (1.4&times;)</label>
+</div>
+</div>
+<div class="calc-results" id="calcResults"></div>
+<p id="multBreakdown"></p>
+</div>
+</div>
+</div>
+
+<!-- ADMIN PANEL -->
+<div class="admin-panel" id="adminPanel">
+<button class="admin-close" id="adminClose">&times;</button>
+<h3 id="adminTitle">Admin Login</h3>
+<button class="admin-btn mobile-edit-home" id="mobileEditHomeBtn" style="display:none;">Edit Home Page</button>
+<div id="adminLogin">
+<input id="email" placeholder="Email"/>
+<input id="password" type="password" placeholder="Password"/>
+<button class="admin-btn" id="loginBtn">Login</button>
+</div>
+<hr style="border:0;border-top:1px solid var(--border);margin:16px 0;">
+<div id="adminTools" style="display:none;">
+<div class="name-wrap">
+<input id="name" placeholder="Pet Name" autocomplete="off"/>
+<div id="nameSuggestions"></div>
+</div>
+<input id="normal" placeholder="Normal Value"/>
+<input id="golden" placeholder="Golden Value"/>
+<input id="rainbow" placeholder="Rainbow Value"/>
+<select id="rarity">
+<option value="Basic">Basic</option><option value="Rare">Rare</option><option value="Epic">Epic</option>
+<option value="Legendary">Legendary</option><option value="Mythical">Mythical</option>
+<option value="Special">Special</option><option value="Secret">Secret</option><option value="Mega">Mega</option>
+<option value="Exclusive">Exclusive</option>
+</select>
+<select id="demand">
+<option value="?">? (Unknown)</option><option value="No Demand">No Demand</option><option value="Low">Low</option>
+<option value="Medium">Medium</option><option value="High">High</option><option value="Super High">Super High</option>
+</select>
+<button class="admin-btn" id="addPetBtn">Add / Update</button>
+<button class="admin-btn danger" id="logoutBtn" style="margin-top:14px;">Logout</button>
+</div>
+</div>
+
+<!-- SUPER ADMIN PANEL -->
+<div class="admin-panel" id="superAdminPanel">
+<button class="admin-close" id="superAdminClose">&times;</button>
+<h3>Super Admin</h3>
+<div id="superAdminTools" style="display:none;">
+<button class="admin-btn teal" id="seedBtn">Seed All Pets (184)</button>
+<button class="admin-btn teal" id="demandBtn">Set Demand Values</button>
+</div>
+<p id="superAdminMsg" style="color:var(--text-3);font-size:12px;margin-top:10px;">Login via admin panel first.</p>
+</div>
+
+<!-- HOME EDITOR PANEL -->
+<div class="home-editor" id="homeEditor">
+<h3>Edit Home Page <button class="admin-close" id="homeEditorClose">&times;</button></h3>
+<label>Title (use | for line break)</label>
+<input id="heTitle" placeholder="Clicker Sim|Value List">
+<label>Subtitle</label>
+<textarea id="heSub" rows="2" placeholder="The definitive trading reference..."></textarea>
+<label>Stats</label>
+<div class="he-row">
+<div><input id="heStat1Num" placeholder="184"><input id="heStat1Label" placeholder="Total Pets" style="margin-top:4px;"></div>
+<div><input id="heStat2Num" placeholder="9"><input id="heStat2Label" placeholder="Rarities" style="margin-top:4px;"></div>
+<div><input id="heStat3Num" placeholder="3"><input id="heStat3Label" placeholder="Variants" style="margin-top:4px;"></div>
+</div>
+<label>Announcement Banner (leave empty to hide)</label>
+<textarea id="heBanner" rows="2" placeholder="Optional announcement text..."></textarea>
+<div class="he-banner-preview" id="heBannerPreview">No banner</div>
+<hr style="border:0;border-top:1px solid var(--border);margin:16px 0;">
+<label>Text Boxes</label>
+<button class="admin-btn" id="heAddTbBtn" style="margin:6px 0 8px;font-size:12px;padding:8px;">+ Add Text Box</button>
+<div class="he-tb-list" id="heTbList"></div>
+<div class="he-actions">
+<button class="admin-btn" id="heSaveBtn">Save</button>
+<button class="admin-btn danger" id="heResetBtn">Reset</button>
+</div>
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+getAuth,
+signInWithEmailAndPassword,
+signOut,
+onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import {
+getFirestore,
+collection,
+doc,
+getDocs,
+setDoc,
+deleteDoc,
+getDoc,
+writeBatch
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+/* FIREBASE */
+const firebaseConfig = {
+apiKey: "AIzaSyCD6mwFA3y6xE8pZwLsVWmBKO_VLXTzxxE",
+authDomain: "clicker-value-list.firebaseapp.com",
+projectId: "clicker-value-list",
+storageBucket: "clicker-value-list.firebasestorage.app",
+messagingSenderId: "55307390383",
+appId: "1:55307390383:web:0cc96c0446b83061cb335a"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+/* ALL 184 PETS */
+const ALL_PETS = [
+{name:"Fish",rarity:"Basic"},{name:"Purple Jellyfish",rarity:"Basic"},{name:"Summer Cat",rarity:"Basic"},{name:"Summer Dog",rarity:"Basic"},{name:"Nebula Wyvern",rarity:"Basic"},{name:"Seraph",rarity:"Basic"},{name:"Starling Sprite",rarity:"Basic"},{name:"Supernova",rarity:"Basic"},{name:"Cat",rarity:"Basic"},{name:"Dog",rarity:"Basic"},{name:"Bunny",rarity:"Basic"},{name:"Chicken",rarity:"Basic"},{name:"Black Dominus",rarity:"Basic"},{name:"Blue Block",rarity:"Basic"},{name:"Blue Dominus",rarity:"Basic"},{name:"Blue Dragon",rarity:"Basic"},{name:"Blue Wizard",rarity:"Basic"},{name:"Chest",rarity:"Basic"},{name:"Green Block",rarity:"Basic"},{name:"Green Dragon",rarity:"Basic"},{name:"Green Wizard",rarity:"Basic"},{name:"Magma",rarity:"Basic"},{name:"Orange Block",rarity:"Basic"},{name:"Orange Dominus",rarity:"Basic"},{name:"Orange Wizard",rarity:"Basic"},{name:"Panda",rarity:"Basic"},{name:"Pink Dragon",rarity:"Basic"},{name:"Police",rarity:"Basic"},{name:"Potion",rarity:"Basic"},{name:"Pumpkin",rarity:"Basic"},{name:"Purple Block",rarity:"Basic"},{name:"Purple Wizard",rarity:"Basic"},{name:"Red Block",rarity:"Basic"},{name:"Red Dominus",rarity:"Basic"},{name:"Red Dragon",rarity:"Basic"},{name:"Red Wizard",rarity:"Basic"},{name:"Robot",rarity:"Basic"},{name:"White Dominus",rarity:"Basic"},{name:"Yellow Dragon",rarity:"Basic"},{name:"Zombie",rarity:"Basic"},{name:"Black Cat",rarity:"Basic"},{name:"Calf",rarity:"Basic"},{name:"Squirrel",rarity:"Basic"},{name:"Wolf",rarity:"Basic"},{name:"Seal",rarity:"Basic"},{name:"Goat",rarity:"Basic"},{name:"Cosmic Crawler",rarity:"Basic"},{name:"Mouse",rarity:"Basic"},{name:"Giraffe",rarity:"Basic"},{name:"Zebra",rarity:"Basic"},{name:"Cupcake",rarity:"Basic"},{name:"Chocolate",rarity:"Basic"},{name:"Turtle",rarity:"Basic"},{name:"Slime",rarity:"Basic"},{name:"Snake",rarity:"Basic"},{name:"Reversed Cat",rarity:"Basic"},
+{name:"Blue Jellyfish",rarity:"Rare"},{name:"Pink Bunny",rarity:"Rare"},{name:"Pig",rarity:"Rare"},{name:"Cow",rarity:"Rare"},{name:"Bear",rarity:"Rare"},{name:"Raccoon",rarity:"Rare"},{name:"Penguin",rarity:"Rare"},{name:"Polar Bear",rarity:"Rare"},{name:"Spider",rarity:"Rare"},{name:"Monkey",rarity:"Rare"},{name:"Camel",rarity:"Rare"},{name:"Fox",rarity:"Rare"},{name:"Candy",rarity:"Rare"},{name:"Cookieman",rarity:"Rare"},{name:"Black Bear",rarity:"Rare"},{name:"Gold Fish",rarity:"Rare"},{name:"Shark",rarity:"Rare"},{name:"Red Hydominus",rarity:"Rare"},{name:"Red Gift",rarity:"Rare"},{name:"Tanuki",rarity:"Rare"},{name:"Blue Gift",rarity:"Rare"},{name:"Magma Cube",rarity:"Rare"},{name:"Molten Slime",rarity:"Rare"},{name:"Reversed Dog",rarity:"Rare"},{name:"Red Balloon",rarity:"Rare"},{name:"Holy Egg",rarity:"Rare"},{name:"Blue Balloon",rarity:"Rare"},
+{name:"Crab",rarity:"Epic"},{name:"Bee",rarity:"Epic"},{name:"Owl",rarity:"Epic"},{name:"Skier",rarity:"Epic"},{name:"Yeti",rarity:"Epic"},{name:"Tiger",rarity:"Epic"},{name:"Bull",rarity:"Epic"},{name:"Cheetah",rarity:"Epic"},{name:"Ice Cream",rarity:"Epic"},{name:"Strawberry",rarity:"Epic"},{name:"Unicorn",rarity:"Epic"},{name:"Duck",rarity:"Epic"},{name:"Frog",rarity:"Epic"},{name:"Orange Hydominus",rarity:"Epic"},{name:"Sakura Turtle",rarity:"Epic"},{name:"Tiny Firecracker",rarity:"Epic"},{name:"Hellfire Bat",rarity:"Epic"},{name:"Disco Ball",rarity:"Epic"},{name:"Aurelite Halo",rarity:"Epic"},{name:"Shattered Shard",rarity:"Epic"},{name:"Yellow Seahorse",rarity:"Epic"},{name:"Red Seahorse",rarity:"Epic"},
+{name:"Pufferfish",rarity:"Legendary"},{name:"Deer",rarity:"Legendary"},{name:"Snowman",rarity:"Legendary"},{name:"Gorilla",rarity:"Legendary"},{name:"Lion",rarity:"Legendary"},{name:"Bubble Gum",rarity:"Legendary"},{name:"Candy Gun",rarity:"Legendary"},{name:"Swimmer",rarity:"Legendary"},{name:"Blue Hydominus",rarity:"Legendary"},{name:"Black Hydominus",rarity:"Legendary"},{name:"Lotus Serpent",rarity:"Legendary"},{name:"Chest Mimic",rarity:"Legendary"},{name:"Pet Stack",rarity:"Legendary"},{name:"Party Cogmower",rarity:"Legendary"},{name:"Cherubis Bloom",rarity:"Legendary"},{name:"Clicker Tetra Cube",rarity:"Legendary"},{name:"Shell",rarity:"Legendary"},
+{name:"Elephant",rarity:"Mythical"},{name:"Cactus",rarity:"Mythical"},{name:"Cowboy",rarity:"Mythical"},{name:"Candy Dominus",rarity:"Mythical"},{name:"Star Fish",rarity:"Mythical"},{name:"Kraken",rarity:"Mythical"},{name:"White Hydominus",rarity:"Mythical"},{name:"Phoenix",rarity:"Mythical"},{name:"The Overlord",rarity:"Mythical"},{name:"500K Overlord",rarity:"Mythical"},{name:"Boombox",rarity:"Mythical"},{name:"Shard",rarity:"Mythical"},{name:"1M Star",rarity:"Mythical"},{name:"Starforge",rarity:"Mythical"},{name:"Poly",rarity:"Mythical"},
+{name:"Acorn",rarity:"Secret"},{name:"Chocolate Ice Cream",rarity:"Secret"},{name:"Sea Serpent",rarity:"Secret"},{name:"Poseidon",rarity:"Secret"},{name:"Petal Moth",rarity:"Secret"},{name:"Cataclysm Dragon",rarity:"Secret"},{name:"Kitsune",rarity:"Secret"},{name:"Diamond",rarity:"Secret"},{name:"Hellwing",rarity:"Secret"},{name:"Ember Champion",rarity:"Secret"},{name:"Core Guardian",rarity:"Secret"},{name:"Equalizer",rarity:"Secret"},{name:"Firecrackers",rarity:"Secret"},{name:"Giant Holy Egg",rarity:"Secret"},{name:"The Clicker Trophy",rarity:"Secret"},{name:"1M Click",rarity:"Secret"},{name:"Godly Gem",rarity:"Secret"},{name:"1M Rebirth",rarity:"Secret"},{name:"Ophanim",rarity:"Secret"},{name:"Cat In A Bucket",rarity:"Secret"},{name:"Chest Mimic In A Bucket",rarity:"Secret"},{name:"Dog In A Bucket",rarity:"Secret"},{name:"Turtle In A Bucket",rarity:"Secret"},{name:"Apex",rarity:"Secret"},
+{name:"Vault Keeper",rarity:"Special"},{name:"Midas",rarity:"Special"},{name:"Eternal Star",rarity:"Special"},{name:"Crimson Star",rarity:"Special"},{name:"Eternal Shard",rarity:"Special"},{name:"Crimson Shard",rarity:"Special"},{name:"Eternal Trophy",rarity:"Special"},{name:"Crimson Trophy",rarity:"Special"},{name:"Abyss",rarity:"Special"},{name:"Overseer",rarity:"Special"},
+{name:"Astronaut",rarity:"Exclusive"},{name:"Earth",rarity:"Exclusive"},{name:"Rocket",rarity:"Exclusive"},{name:"Angel",rarity:"Exclusive"},{name:"Angel & Devil",rarity:"Exclusive"},{name:"Alien",rarity:"Exclusive"},{name:"UFO",rarity:"Exclusive"},{name:"Embercrest",rarity:"Exclusive"},{name:"Solflare",rarity:"Exclusive"},{name:"All Seeing Guardian",rarity:"Exclusive"},{name:"Frozen Eye Cube",rarity:"Exclusive"},{name:"Royal Trophy",rarity:"Exclusive"},
+{name:"Ktulhu",rarity:"Mega"}
+];
+
+/* PET OBTAINABILITY DATABASE */
+const PET_INFO = {
+"Fish":{s:"obtainable",t:"Hatch from Bucket Of Sand Egg (150 Shells) on Beach Island."},
+"Purple Jellyfish":{s:"obtainable",t:"Hatch from Sand Castle Egg (500 Shells) on Beach Island."},
+"Summer Cat":{s:"obtainable",t:"Hatch from Bucket Of Sand Egg (150 Shells) on Beach Island. Also from Summer Rewards Road (Level 20)."},
+"Summer Dog":{s:"obtainable",t:"Hatch from Bucket Of Sand Egg (150 Shells) on Beach Island. Also from Summer Rewards Road (Level 10)."},
+"Nebula Wyvern":{s:"limited",t:"From Cosmic Egg (special unlock required). May be currently unobtainable if the Cosmic Egg is disabled."},
+"Seraph":{s:"limited",t:"From Cosmic Egg (special unlock required). May be currently unobtainable if the Cosmic Egg is disabled."},
+"Starling Sprite":{s:"limited",t:"From Cosmic Egg (special unlock required). May be currently unobtainable if the Cosmic Egg is disabled."},
+"Supernova":{s:"limited",t:"From Cosmic Egg (special unlock required). May be currently unobtainable if the Cosmic Egg is disabled."},
+"Cat":{s:"obtainable",t:"Hatch from Basic Egg (250 Clicks) on Spawn Island. Also a starter pet choice."},
+"Dog":{s:"obtainable",t:"Hatch from Basic Egg (250 Clicks) on Spawn Island. Also a starter pet choice."},
+"Bunny":{s:"obtainable",t:"Hatch from Basic Egg (250 Clicks) on Spawn Island. Also a starter pet choice."},
+"Chicken":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Black Dominus":{s:"obtainable",t:"Rebirth reward pet (untradeable). Obtained through the rebirth system."},
+"Blue Block":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Blue Dominus":{s:"obtainable",t:"Rebirth reward pet (untradeable). Obtained through the rebirth system."},
+"Blue Dragon":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Blue Wizard":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Chest":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Green Block":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Green Dragon":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Green Wizard":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Magma":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Orange Block":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Orange Dominus":{s:"obtainable",t:"Rebirth reward pet (untradeable). Obtained through the rebirth system."},
+"Orange Wizard":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Panda":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Pink Dragon":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Police":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Potion":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Pumpkin":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Purple Block":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Purple Wizard":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Red Block":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Red Dominus":{s:"obtainable",t:"Rebirth reward pet (untradeable). Obtained through the rebirth system."},
+"Red Dragon":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Red Wizard":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Robot":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"White Dominus":{s:"obtainable",t:"Rebirth reward pet (untradeable). Obtained through the rebirth system."},
+"Yellow Dragon":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Zombie":{s:"obtainable",t:"Rebirth reward pet. Obtained through the rebirth system."},
+"Black Cat":{s:"obtainable",t:"Hatch from Flower Egg (2,750 Clicks) on Spawn Island."},
+"Calf":{s:"obtainable",t:"Hatch from Flower Egg (2,750 Clicks) on Spawn Island."},
+"Squirrel":{s:"obtainable",t:"Hatch from Acorn Egg (175,000 Clicks)."},
+"Wolf":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Seal":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Goat":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Cosmic Crawler":{s:"limited",t:"From Cosmic Egg (special unlock required). May be currently unobtainable if the Cosmic Egg is disabled."},
+"Mouse":{s:"obtainable",t:"Hatch from Wood Egg (40,000,000 Clicks) on Forest Island."},
+"Giraffe":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island."},
+"Zebra":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island."},
+"Cupcake":{s:"obtainable",t:"Hatch from Cotton Candy Egg (20,000,000,000 Clicks) on Candy Island."},
+"Chocolate":{s:"obtainable",t:"Hatch from Chocolate Egg (70,000,000,000 Clicks) on Candy Island."},
+"Turtle":{s:"obtainable",t:"Hatch from Palm Tree Egg (450,000,000,000 Clicks) on Beach Island."},
+"Slime":{s:"obtainable",t:"Hatch from Palm Tree Egg (450,000,000,000 Clicks) on Beach Island."},
+"Snake":{s:"obtainable",t:"Hatch from Beach Ball Egg (900,000,000,000 Clicks) on Beach Island."},
+"Reversed Cat":{s:"obtainable",t:"Hatch from Disco Egg (200Q Clicks) on Rave Island."},
+"Overseer":{s:"obtainable",t:"Summer Rewards Road (Level 75)."},
+"Blue Jellyfish":{s:"obtainable",t:"Hatch from Sand Castle Egg (500 Shells) on Beach Island."},
+"Pink Bunny":{s:"limited",t:"No known egg or obtainment source found in game files. May be a legacy or event pet."},
+"Pig":{s:"obtainable",t:"Hatch from Basic Egg (250 Clicks) on Spawn Island."},
+"Cow":{s:"obtainable",t:"Hatch from Flower Egg (2,750 Clicks) on Spawn Island."},
+"Bear":{s:"obtainable",t:"Hatch from Flower Egg (2,750 Clicks) on Spawn Island."},
+"Raccoon":{s:"obtainable",t:"Hatch from Acorn Egg (175,000 Clicks)."},
+"Penguin":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Polar Bear":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Spider":{s:"obtainable",t:"Hatch from Wood Egg (40,000,000 Clicks) on Forest Island."},
+"Monkey":{s:"obtainable",t:"Hatch from Wood Egg (40,000,000 Clicks) on Forest Island."},
+"Camel":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island."},
+"Fox":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island."},
+"Candy":{s:"obtainable",t:"Hatch from Cotton Candy Egg (20,000,000,000 Clicks) on Candy Island."},
+"Cookieman":{s:"obtainable",t:"Hatch from Chocolate Egg (70,000,000,000 Clicks) on Candy Island."},
+"Black Bear":{s:"obtainable",t:"Hatch from Palm Tree Egg (450,000,000,000 Clicks) on Beach Island."},
+"Gold Fish":{s:"obtainable",t:"Hatch from Beach Ball Egg (900,000,000,000 Clicks) on Beach Island. Also from Summer Rewards Road (Level 15)."},
+"Shark":{s:"obtainable",t:"Hatch from Beach Ball Egg (900,000,000,000 Clicks) on Beach Island. Also from Summer Rewards Road (Level 30)."},
+"Red Hydominus":{s:"obtainable",t:"Hatch from Dominus Egg (25T Clicks) on Sakura Island. Untradeable when hatched."},
+"Red Gift":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). No longer obtainable. Only existing copies remain in circulation."},
+"Tanuki":{s:"obtainable",t:"Hatch from Blossom Egg (100T Clicks) on Sakura Island."},
+"Blue Gift":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). No longer obtainable. Only existing copies remain in circulation."},
+"Magma Cube":{s:"obtainable",t:"Hatch from Volcano Egg (10Q Clicks) on Volcano Island."},
+"Molten Slime":{s:"obtainable",t:"Hatch from Volcano Egg (10Q Clicks) on Volcano Island."},
+"Reversed Dog":{s:"obtainable",t:"Hatch from Disco Egg (200Q Clicks) on Rave Island."},
+"Red Balloon":{s:"obtainable",t:"Hatch from 1M Egg (1,000,000,000 Clicks) on 1M Milestone Island."},
+"Holy Egg":{s:"obtainable",t:"Hatch from Angel Egg (4Qi Clicks) on Heaven Island."},
+"Blue Balloon":{s:"obtainable",t:"Hatch from 1M Egg (1,000,000,000 Clicks) on 1M Milestone Island."},
+"Crab":{s:"obtainable",t:"Hatch from Sand Castle Egg (500 Shells) on Beach Island."},
+"Bee":{s:"obtainable",t:"Hatch from Flower Egg (2,750 Clicks) on Spawn Island."},
+"Owl":{s:"obtainable",t:"Hatch from Acorn Egg (175,000 Clicks)."},
+"Skier":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Yeti":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Tiger":{s:"obtainable",t:"Hatch from Wood Egg (40,000,000 Clicks) on Forest Island."},
+"Bull":{s:"obtainable",t:"Hatch from Wood Egg (40,000,000 Clicks) on Forest Island."},
+"Cheetah":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island."},
+"Ice Cream":{s:"obtainable",t:"Hatch from Cotton Candy Egg (20,000,000,000 Clicks) on Candy Island."},
+"Strawberry":{s:"obtainable",t:"Hatch from Chocolate Egg (70,000,000,000 Clicks) on Candy Island."},
+"Unicorn":{s:"obtainable",t:"Hatch from Chocolate Egg (70,000,000,000 Clicks) on Candy Island."},
+"Duck":{s:"obtainable",t:"Hatch from Palm Tree Egg (450,000,000,000 Clicks) on Beach Island."},
+"Frog":{s:"obtainable",t:"Hatch from Beach Ball Egg (900,000,000,000 Clicks) on Beach Island."},
+"Orange Hydominus":{s:"obtainable",t:"Hatch from Dominus Egg (25T Clicks) on Sakura Island."},
+"Sakura Turtle":{s:"obtainable",t:"Hatch from Blossom Egg (100T Clicks) on Sakura Island."},
+"Tiny Firecracker":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). No longer obtainable. Only existing copies remain in circulation."},
+"Hellfire Bat":{s:"obtainable",t:"Hatch from Volcano Egg (10Q Clicks) on Volcano Island."},
+"Disco Ball":{s:"obtainable",t:"Hatch from Disco Egg (200Q Clicks) on Rave Island."},
+"Aurelite Halo":{s:"obtainable",t:"Hatch from Angel Egg (4Qi Clicks) on Heaven Island."},
+"Shattered Shard":{s:"obtainable",t:"Hatch from 1M Egg (1,000,000,000 Clicks) on 1M Milestone Island."},
+"Yellow Seahorse":{s:"obtainable",t:"Hatch from Coconut Egg (1,000 Shells) on Beach Island."},
+"Red Seahorse":{s:"obtainable",t:"Hatch from Coconut Egg (1,000 Shells) on Beach Island."},
+"Pufferfish":{s:"obtainable",t:"Hatch from Sand Castle Egg (500 Shells) on Beach Island."},
+"Deer":{s:"obtainable",t:"Hatch from Acorn Egg (175,000 Clicks)."},
+"Snowman":{s:"obtainable",t:"Hatch from Snowman Egg (2,500,000 Clicks) on Winter Island."},
+"Gorilla":{s:"obtainable",t:"Hatch from Wood Egg (40,000,000 Clicks) on Forest Island. Also in Robux Forest Egg."},
+"Lion":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island."},
+"Bubble Gum":{s:"obtainable",t:"Hatch from Cotton Candy Egg (20,000,000,000 Clicks) on Candy Island."},
+"Candy Gun":{s:"obtainable",t:"Hatch from Chocolate Egg (70,000,000,000 Clicks) on Candy Island. Also in Robux Candy Egg."},
+"Swimmer":{s:"obtainable",t:"Hatch from Beach Ball Egg (900,000,000,000 Clicks) on Beach Island. Also from Summer Rewards Road (Level 40)."},
+"Blue Hydominus":{s:"obtainable",t:"Hatch from Dominus Egg (25T Clicks) on Sakura Island."},
+"Black Hydominus":{s:"obtainable",t:"Hatch from Dominus Egg (25T Clicks) on Sakura Island."},
+"Lotus Serpent":{s:"obtainable",t:"Hatch from Blossom Egg (100T Clicks) on Sakura Island."},
+"Chest Mimic":{s:"obtainable",t:"Hatch from Volcano Egg (10Q Clicks) on Volcano Island. Also in Robux Volcano Egg."},
+"Pet Stack":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). No longer obtainable. Only existing copies remain in circulation."},
+"Party Cogmower":{s:"obtainable",t:"Hatch from Disco Egg (200Q Clicks) on Rave Island."},
+"Cherubis Bloom":{s:"obtainable",t:"Hatch from Angel Egg (4Qi Clicks) on Heaven Island."},
+"Clicker Tetra Cube":{s:"obtainable",t:"Hatch from 1M Egg (1,000,000,000 Clicks) on 1M Milestone Island."},
+"Shell":{s:"obtainable",t:"Hatch from Coconut Egg (1,000 Shells) on Beach Island."},
+"Elephant":{s:"obtainable",t:"Hatch from Wood Egg (40,000,000 Clicks) on Forest Island. Also in Robux Forest Egg."},
+"Cactus":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island. Also in Robux Forest Egg."},
+"Cowboy":{s:"obtainable",t:"Hatch from Cactus Egg (300,000,000 Clicks) on Desert Island. Also in Robux Forest Egg."},
+"Candy Dominus":{s:"obtainable",t:"Hatch from Chocolate Egg (70,000,000,000 Clicks) on Candy Island. Also in Robux Candy Egg."},
+"Star Fish":{s:"obtainable",t:"Hatch from Beach Ball Egg (900,000,000,000 Clicks) on Beach Island. Also from Summer Rewards Road (Level 50)."},
+"Kraken":{s:"obtainable",t:"Hatch from Beach Ball Egg (900,000,000,000 Clicks) on Beach Island. Also in Robux Winter Egg and Summer Rewards Road (Level 60)."},
+"White Hydominus":{s:"obtainable",t:"Hatch from Dominus Egg (25T Clicks) on Sakura Island."},
+"Phoenix":{s:"obtainable",t:"Hatch from Blossom Egg (100T Clicks) on Sakura Island. Also in Robux Beach Egg."},
+"The Overlord":{s:"obtainable",t:"Hatch from Volcano Egg (10Q Clicks) on Volcano Island. Also in Robux Volcano Egg."},
+"500K Overlord":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). No longer obtainable. Only existing copies remain in circulation."},
+"Boombox":{s:"obtainable",t:"Hatch from Disco Egg (200Q Clicks) on Rave Island. Also in Robux Rave Egg."},
+"Shard":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). No longer obtainable. Only existing copies remain in circulation."},
+"1M Star":{s:"obtainable",t:"Hatch from 1M Egg (1,000,000,000 Clicks) on 1M Milestone Island."},
+"Starforge":{s:"obtainable",t:"Hatch from Angel Egg (4Qi Clicks) on Heaven Island. Also in Robux Sakura Egg."},
+"Poly":{s:"obtainable",t:"Hatch from Coconut Egg (1,000 Shells) on Beach Island."},
+"Acorn":{s:"obtainable",t:"Extremely rare hatch from Sand Castle Egg (500 Shells). ~0.00001% chance."},
+"Chocolate Ice Cream":{s:"obtainable",t:"Extremely rare hatch from Bucket Of Sand Egg (150 Shells). ~0.00001% chance."},
+"Sea Serpent":{s:"obtainable",t:"Summer Rewards Road (Level 68)."},
+"Poseidon":{s:"obtainable",t:"Extremely rare hatch from Beach Ball Egg. ~0.00001% chance. Also from Summer Rewards Road (Level 72)."},
+"Abyss":{s:"obtainable",t:"Scavenger Hunt reward. Collect items from 8 different eggs (Acorn, Basic, Cactus, Chocolate, Flower, Snowman, Wood, Volcano)."},
+"Petal Moth":{s:"obtainable",t:"Extremely rare hatch from Blossom Egg (100T Clicks). ~0.0000067% chance."},
+"Cataclysm Dragon":{s:"robux",t:"Robux pet purchase (limited stock: 150). Comes with UltraLuck T1 enchant."},
+"Kitsune":{s:"obtainable",t:"Extremely rare hatch from Blossom Egg (100T Clicks). ~0.000002% chance."},
+"Diamond":{s:"robux",t:"Robux pet purchase (limited stock: 1,499)."},
+"Hellwing":{s:"obtainable",t:"Extremely rare hatch from Volcano Egg (10Q Clicks). ~0.000005% chance."},
+"Ember Champion":{s:"obtainable",t:"Craft via Potion Recipe: 67x Enchant Relic."},
+"Core Guardian":{s:"obtainable",t:"Extremely rare hatch from Volcano Egg (10Q Clicks). ~0.0000017% chance."},
+"Equalizer":{s:"obtainable",t:"Extremely rare hatch from Disco Egg (200Q Clicks). ~0.0000067% chance."},
+"Firecrackers":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). ~0.0000067% chance. No longer obtainable."},
+"Giant Holy Egg":{s:"obtainable",t:"Craft via Potion Recipe: 67x Enchant Relic."},
+"The Clicker Trophy":{s:"unobtainable",t:"Was from the 500K Egg (retired/NotHatchable). ~0.0000029% chance. No longer obtainable."},
+"1M Click":{s:"obtainable",t:"Extremely rare hatch from 1M Egg. ~0.000005% chance."},
+"Godly Gem":{s:"obtainable",t:"Extremely rare hatch from Angel Egg (4Qi Clicks). ~0.000005% chance."},
+"1M Rebirth":{s:"obtainable",t:"Extremely rare hatch from 1M Egg. ~0.0000017% chance."},
+"Ophanim":{s:"obtainable",t:"Extremely rare hatch from Angel Egg (4Qi Clicks). ~0.0000017% chance."},
+"Cat In A Bucket":{s:"obtainable",t:"Extremely rare hatch from Coconut Egg (1,000 Shells). ~0.00001% chance."},
+"Chest Mimic In A Bucket":{s:"obtainable",t:"Extremely rare hatch from Coconut Egg (1,000 Shells). ~0.00001% chance."},
+"Dog In A Bucket":{s:"obtainable",t:"Extremely rare hatch from Coconut Egg (1,000 Shells). ~0.00001% chance."},
+"Turtle In A Bucket":{s:"obtainable",t:"Extremely rare hatch from Coconut Egg (1,000 Shells). ~0.00001% chance."},
+"Apex":{s:"obtainable",t:"Craft via Potion Recipe: 67x Summer Relic."},
+"Vault Keeper":{s:"obtainable",t:"Purchase from Tier 3 Merchant (requires 30,000 Respect). Costs Gems."},
+"Midas":{s:"obtainable",t:"Purchase from Tier 3 Merchant (requires 30,000 Respect). Costs Gems."},
+"Eternal Star":{s:"leaderboard",t:"Leaderboard reward (LeaderboardLuck T1). Awarded to top players on Clicks/Rebirths/Playtime/Power leaderboards."},
+"Crimson Star":{s:"leaderboard",t:"Leaderboard reward (LeaderboardLuck T1). Awarded to top players on leaderboards."},
+"Eternal Shard":{s:"leaderboard",t:"Leaderboard reward (LeaderboardLuck T2). Awarded to high-ranking leaderboard players."},
+"Crimson Shard":{s:"leaderboard",t:"Leaderboard reward (LeaderboardLuck T2). Awarded to high-ranking leaderboard players."},
+"Eternal Trophy":{s:"leaderboard",t:"Leaderboard reward (LeaderboardLuck T5). Awarded to the top leaderboard players."},
+"Crimson Trophy":{s:"leaderboard",t:"Leaderboard reward (LeaderboardLuck T5). Awarded to the top leaderboard players."},
+"Astronaut":{s:"robux",t:"Hatch from Exclusive Egg (Robux purchase)."},
+"Earth":{s:"robux",t:"Hatch from Exclusive Egg (Robux purchase)."},
+"Rocket":{s:"robux",t:"Hatch from Exclusive Egg (Robux purchase)."},
+"Angel":{s:"robux",t:"Robux pet purchase. Comes with Lucky T1 enchant."},
+"Angel & Devil":{s:"robux",t:"Robux pet purchase (limited stock: 250). Comes with SuperRebirth T1 enchant."},
+"Alien":{s:"robux",t:"Hatch from Exclusive Egg (Robux purchase)."},
+"UFO":{s:"robux",t:"Hatch from Exclusive Egg (Robux purchase)."},
+"Embercrest":{s:"robux",t:"Robux pet purchase. Comes with Lucky T5 enchant."},
+"Solflare":{s:"robux",t:"Robux pet purchase. Comes with SuperRebirth T3 enchant."},
+"All Seeing Guardian":{s:"robux",t:"Robux pet purchase (limited stock: 999). Comes with Lucky T5 enchant."},
+"Frozen Eye Cube":{s:"robux",t:"Robux pet purchase. Comes with Lucky T5 enchant."},
+"Royal Trophy":{s:"robux",t:"Robux pet purchase. Comes with SuperRebirth T3 enchant."},
+"Ktulhu":{s:"obtainable",t:"Extremely rare hatch from Coconut Egg (1,000 Shells). ~0.00000025% chance. Rarest pet in the game."}
+};
+
+const STATUS_LABELS = {
+obtainable:"Obtainable",unobtainable:"Unobtainable",limited:"Limited / Unknown",leaderboard:"Leaderboard Only",robux:"Robux Only"
+};
+
+/* PET BASE STATS */
+const PET_STATS = {
+"1M Click":{Clicks:65000000},"1M Rebirth":{Clicks:125000000},"1M Star":{Clicks:1750000},"500K Overlord":{Clicks:650000},
+"Abyss":{Clicks:40000000,Shells:15},"Acorn":{Shells:112.5},"Alien":{Clicks:95000},
+"All Seeing Guardian":{Clicks:3000000,Gems:9},"Angel":{Clicks:30000,Gems:3},"Angel & Devil":{Clicks:70000,Gems:8},
+"Apex":{Clicks:600000000},"Astronaut":{Clicks:1800},"Aurelite Halo":{Clicks:175000},
+"Bear":{Clicks:19},"Bee":{Clicks:28},"Black Bear":{Clicks:3000},"Black Cat":{Clicks:11},"Black Dominus":{Clicks:4},
+"Black Hydominus":{Clicks:13200},"Blue Balloon":{Clicks:85000},"Blue Block":{Clicks:4},"Blue Dominus":{Clicks:4},
+"Blue Dragon":{Clicks:4},"Blue Gift":{Clicks:15000},"Blue Hydominus":{Clicks:11400},"Blue Jellyfish":{Clicks:45000,Shells:4.5},
+"Blue Wizard":{Clicks:4},"Boombox":{Clicks:975000},"Bubble Gum":{Clicks:1650},"Bull":{Clicks:245},"Bunny":{Clicks:3},
+"Cactus":{Clicks:900},"Calf":{Clicks:11},"Camel":{Clicks:338},"Candy":{Clicks:820},"Candy Dominus":{Clicks:3000},
+"Candy Gun":{Clicks:2250},"Cat":{Clicks:2},"Cat In A Bucket":{Clicks:200000000,Shells:70},
+"Cataclysm Dragon":{Clicks:2000000},"Cheetah":{Clicks:513},"Cherubis Bloom":{Clicks:500000},"Chest":{Clicks:4},
+"Chest Mimic":{Clicks:150000},"Chest Mimic In A Bucket":{Clicks:200000000,Shells:70},"Chicken":{Clicks:3},
+"Chocolate":{Clicks:780},"Chocolate Ice Cream":{Shells:18},"Clicker Tetra Cube":{Clicks:500000},
+"Cookieman":{Clicks:980},"Core Guardian":{Clicks:8000000},"Cosmic Crawler":{Clicks:100},"Cow":{Clicks:15},
+"Cowboy":{Clicks:1475},"Crab":{Clicks:75000,Shells:7.5},"Crimson Shard":{Clicks:1000000000},"Crimson Star":{Clicks:400000000},
+"Crimson Trophy":{Clicks:2250000000},"Cupcake":{Clicks:650},"Deer":{Clicks:53},
+"Diamond":{Clicks:2500000,Shells:30},"Disco Ball":{Clicks:125000},"Dog":{Clicks:2},
+"Dog In A Bucket":{Clicks:200000000,Shells:70},"Duck":{Clicks:3800},"Earth":{Clicks:2400},
+"Elephant":{Clicks:470},"Ember Champion":{Clicks:5000000},"Embercrest":{Clicks:850000,Gems:7},
+"Equalizer":{Clicks:20000000},"Eternal Shard":{Clicks:12500000},"Eternal Star":{Clicks:5000000},
+"Eternal Trophy":{Clicks:25000000},"Firecrackers":{Clicks:25000000},"Fish":{Clicks:10000,Shells:2},
+"Fox":{Clicks:388},"Frog":{Clicks:4200},"Frozen Eye Cube":{Clicks:3000000,Gems:9},
+"Giant Holy Egg":{Clicks:35000000},"Giraffe":{Clicks:188},"Goat":{Clicks:58},
+"Godly Gem":{Clicks:65000000},"Gold Fish":{Clicks:3200},"Gorilla":{Clicks:320},
+"Green Block":{Clicks:4},"Green Dragon":{Clicks:4},"Green Wizard":{Clicks:4},
+"Hellfire Bat":{Clicks:70000},"Hellwing":{Clicks:3000000},"Holy Egg":{Clicks:75000},
+"Ice Cream":{Clicks:1125},"Kitsune":{Clicks:2000000},"Kraken":{Clicks:7600},
+"Ktulhu":{Clicks:10000000000,Shells:150},"Lion":{Clicks:606},"Lotus Serpent":{Clicks:40000},
+"Magma":{Clicks:4},"Magma Cube":{Clicks:25000},"Midas":{Clicks:17000},"Molten Slime":{Clicks:35000},
+"Monkey":{Clicks:170},"Mouse":{Clicks:102},"Nebula Wyvern":{Clicks:1},"Ophanim":{Clicks:125000000},
+"Orange Block":{Clicks:4},"Orange Dominus":{Clicks:4},"Orange Hydominus":{Clicks:9800},"Orange Wizard":{Clicks:4},
+"Overseer":{Clicks:225000000,Shells:40},"Owl":{Clicks:32},"Panda":{Clicks:4},
+"Party Cogmower":{Clicks:350000},"Penguin":{Clicks:68},"Petal Moth":{Clicks:750000},
+"Pet Stack":{Clicks:200000},"Phoenix":{Clicks:90000},"Pig":{Clicks:4},"Pink Bunny":{Clicks:1},
+"Pink Dragon":{Clicks:4},"Polar Bear":{Clicks:78},"Police":{Clicks:4},
+"Poly":{Clicks:2250000,Shells:40},"Poseidon":{Clicks:125000},"Potion":{Clicks:4},
+"Pufferfish":{Clicks:150000,Shells:10.5},"Pumpkin":{Clicks:4},"Purple Block":{Clicks:4},
+"Purple Jellyfish":{Clicks:22500,Shells:3.75},"Purple Wizard":{Clicks:4},"Raccoon":{Clicks:24},
+"Red Balloon":{Clicks:65000},"Red Block":{Clicks:4},"Red Dominus":{Clicks:4},"Red Dragon":{Clicks:4},
+"Red Gift":{Clicks:10000},"Red Hydominus":{Clicks:8500},"Red Seahorse":{Clicks:275000,Shells:16},
+"Red Wizard":{Clicks:4},"Reversed Cat":{Clicks:35000},"Reversed Dog":{Clicks:50000},
+"Robot":{Clicks:4},"Rocket":{Clicks:3200},"Royal Trophy":{Clicks:6000000,Gems:18},
+"Sakura Turtle":{Clicks:15000},"Sea Serpent":{Clicks:5000000,Shells:15},"Seal":{Clicks:49},
+"Seraph":{Clicks:1},"Shard":{Clicks:1300000},"Shark":{Clicks:3600},
+"Shattered Shard":{Clicks:175000},"Shell":{Clicks:650000,Shells:24},"Skier":{Clicks:86},
+"Slime":{Clicks:2400},"Snake":{Clicks:2600},"Snowman":{Clicks:140},
+"Solflare":{Clicks:2200000,Gems:13},"Spider":{Clicks:132},"Squirrel":{Clicks:20},
+"Star Fish":{Clicks:6400},"Starforge":{Clicks:1750000},"Starling Sprite":{Clicks:1},
+"Strawberry":{Clicks:1400},"Summer Cat":{Clicks:5000,Shells:1.5},"Summer Dog":{Clicks:7500,Shells:1.75},"Supernova":{Clicks:1},
+"Swimmer":{Clicks:5200},"Tanuki":{Clicks:12000},"The Clicker Trophy":{Clicks:55000000},
+"The Overlord":{Clicks:350000},"Tiger":{Clicks:207},"Tiny Firecracker":{Clicks:50000},
+"Turtle":{Clicks:2100},"Turtle In A Bucket":{Clicks:200000000,Shells:70},"UFO":{Clicks:150000},
+"Unicorn":{Clicks:1675},"Vault Keeper":{Clicks:15500},"White Dominus":{Clicks:4},
+"White Hydominus":{Clicks:15500},"Wolf":{Clicks:43},"Yellow Dragon":{Clicks:4},
+"Yellow Seahorse":{Clicks:225000,Shells:14},"Yeti":{Clicks:90},"Zebra":{Clicks:281},"Zombie":{Clicks:4}
+};
+
+/* PET ICON ASSET IDs */
+const PET_ICONS = {
+"1M Click":{normal:"115221256771440",golden:"90864742005145"},"1M Rebirth":{normal:"99619770545365",golden:"113493597596824"},
+"1M Star":{normal:"91670232287122",golden:"100347796705597"},"500K Overlord":{normal:"132771239528746",golden:"98769372310118"},
+"Abyss":{normal:"114046874757017",golden:"123586548520045"},"Acorn":{normal:"121864183808487",golden:"98175882442528"},
+"Alien":{normal:"102018852402245",golden:"116952397211926"},"All Seeing Guardian":{normal:"99957352792320",golden:"85753631418756"},
+"Angel":{normal:"79850263086584",golden:"132579694091862"},"Angel & Devil":{normal:"114593019451267",golden:"92917914942776"},
+"Apex":{normal:"130353018367033",golden:"83219974076796"},"Astronaut":{normal:"78300643458253",golden:"133759611352695"},
+"Aurelite Halo":{normal:"70982658481418",golden:"96737415424429"},"Bear":{normal:"130466798991896",golden:"104166879620238"},
+"Bee":{normal:"75437677377369",golden:"102872117456307"},"Black Bear":{normal:"100849484124283",golden:"138236346708066"},
+"Black Cat":{normal:"81156479883478",golden:"94553022514698"},"Black Dominus":{normal:"111130354166220",golden:"109085650096191"},
+"Black Hydominus":{normal:"107558291664947",golden:"110172364885020"},"Blue Balloon":{normal:"117248431989127",golden:"135699155791884"},
+"Blue Block":{normal:"106447954275307",golden:"75023755779333"},"Blue Dominus":{normal:"111668931793453",golden:"112527202462754"},
+"Blue Dragon":{normal:"81517759035540",golden:"101341781865985"},"Blue Gift":{normal:"113085357548330",golden:"97546783595254"},
+"Blue Hydominus":{normal:"135125767670624",golden:"78926816355503"},"Blue Jellyfish":{normal:"88318732629648",golden:"100129341656229"},
+"Blue Wizard":{normal:"81453031678253",golden:"111783930746875"},"Boombox":{normal:"86349572042892",golden:"135971834461849"},
+"Bubble Gum":{normal:"84348209283744",golden:"106563784592022"},"Bull":{normal:"105852961774706",golden:"136068894617216"},
+"Bunny":{normal:"104763135259770",golden:"89929770010982"},"Cactus":{normal:"127314117919964",golden:"108091375807759"},
+"Calf":{normal:"97812410796433",golden:"87583637584278"},"Camel":{normal:"104897716469948",golden:"136646475792449"},
+"Candy":{normal:"95584489425177",golden:"80984692487740"},"Candy Dominus":{normal:"82795329520323",golden:"90014378054246"},
+"Candy Gun":{normal:"77766252091625",golden:"100416519006761"},"Cat":{normal:"90402349428850",golden:"80360476325756"},
+"Cat In A Bucket":{normal:"",golden:""},"Cataclysm Dragon":{normal:"95908721514885",golden:"77450018634808"},
+"Cheetah":{normal:"72914760626794",golden:"82381002936149"},"Cherubis Bloom":{normal:"124617723377564",golden:"80571650298006"},
+"Chest":{normal:"76001967586699",golden:"80994016155647"},"Chest Mimic":{normal:"92749426462005",golden:"124392809981127"},
+"Chest Mimic In A Bucket":{normal:"",golden:""},"Chicken":{normal:"70802139790796",golden:"119094017303614"},
+"Chocolate":{normal:"88579842245566",golden:"90511618175107"},"Chocolate Ice Cream":{normal:"103695890628134",golden:"72024172825656"},
+"Clicker Tetra Cube":{normal:"89055073709988",golden:"93440503249217"},"Cookieman":{normal:"113484920991712",golden:"133995032567061"},
+"Core Guardian":{normal:"98064774940672",golden:"120717968420758"},"Cosmic Crawler":{normal:"117395128818620",golden:"106158805909800"},
+"Cow":{normal:"116193935880630",golden:"125441340227128"},"Cowboy":{normal:"103727699693840",golden:"130062042546382"},
+"Crab":{normal:"106101390579826",golden:"118715050605162"},"Crimson Shard":{normal:"125620321891300",golden:"74604865056187"},
+"Crimson Star":{normal:"99572044860982",golden:"87579316182821"},"Crimson Trophy":{normal:"128185973881910",golden:"98185209156838"},
+"Cupcake":{normal:"128905816444157",golden:"110149487000964"},"Deer":{normal:"102567070166623",golden:"107080331179345"},
+"Diamond":{normal:"75274272264639",golden:"77917773464725"},"Disco Ball":{normal:"126155707363304",golden:"134213053106411"},
+"Dog":{normal:"84816537610420",golden:"112680445961518"},"Dog In A Bucket":{normal:"",golden:""},
+"Duck":{normal:"74730912211465",golden:"138920116849431"},"Earth":{normal:"70394668092797",golden:"139559674398229"},
+"Elephant":{normal:"127429039913734",golden:"135912773069366"},"Ember Champion":{normal:"112778131650646",golden:"119945383610046"},
+"Embercrest":{normal:"129002926817711",golden:""},"Equalizer":{normal:"101667041174340",golden:"124055380113625"},
+"Eternal Shard":{normal:"74219807991706",golden:"139135138229298"},"Eternal Star":{normal:"107559476222602",golden:"132438470389674"},
+"Eternal Trophy":{normal:"81386110522812",golden:"136621056781942"},"Firecrackers":{normal:"117145721492981",golden:"88539354411404"},
+"Fish":{normal:"105943860706214",golden:"90825862351413"},"Fox":{normal:"88839098262704",golden:"82553602858014"},
+"Frog":{normal:"84586002155513",golden:"128848896781116"},"Frozen Eye Cube":{normal:"92833074103894",golden:"116722455621588"},
+"Giant Holy Egg":{normal:"117640275356556",golden:"129816213188017"},"Giraffe":{normal:"124786611820303",golden:"107147128643150"},
+"Goat":{normal:"100840643293388",golden:"113121366121146"},"Godly Gem":{normal:"114654108504631",golden:"71935437699936"},
+"Gold Fish":{normal:"86590960041962",golden:"74362495630252"},"Gorilla":{normal:"111732465618458",golden:"88097523401696"},
+"Green Block":{normal:"140024145482936",golden:"93948569283029"},"Green Dragon":{normal:"102599896021116",golden:"86146867087179"},
+"Green Wizard":{normal:"98702917279600",golden:"123931333870488"},"Hellfire Bat":{normal:"102029048545841",golden:"139375759539849"},
+"Hellwing":{normal:"137075188552606",golden:"97375867983512"},"Holy Egg":{normal:"93430094725986",golden:"118841014173697"},
+"Ice Cream":{normal:"123120221719628",golden:"92766100479357"},"Kitsune":{normal:"130514860854088",golden:"124852857757017"},
+"Kraken":{normal:"87878967180615",golden:"117611114294229"},"Ktulhu":{normal:"111184864451932",golden:"134964665050565"},
+"Lion":{normal:"126606000761880",golden:"133759501297800"},"Lotus Serpent":{normal:"132051694605745",golden:"135116418351960"},
+"Magma":{normal:"136339404560615",golden:"105360547739164"},"Magma Cube":{normal:"72364434873752",golden:"135326803254599"},
+"Midas":{normal:"135557691575268",golden:"103109648069386"},"Molten Slime":{normal:"101193237026541",golden:"110385800001496"},
+"Monkey":{normal:"76566737639052",golden:"124684574732907"},"Mouse":{normal:"72274074632743",golden:"140499747437079"},
+"Nebula Wyvern":{normal:"99259889017315",golden:"81480200164858"},"Ophanim":{normal:"99580393209518",golden:"126965652919695"},
+"Orange Block":{normal:"109885680667646",golden:"136213235707881"},"Orange Dominus":{normal:"125028968714403",golden:"140457619655823"},
+"Orange Hydominus":{normal:"123278674791479",golden:"127555766130472"},"Orange Wizard":{normal:"109647125680437",golden:"139765804898065"},
+"Overseer":{normal:"118501325471758",golden:"125309096558067"},"Owl":{normal:"107483178343791",golden:"82084939256320"},
+"Panda":{normal:"101148954705786",golden:"106947522567911"},"Party Cogmower":{normal:"111691424014620",golden:"112942040863302"},
+"Penguin":{normal:"107610673949818",golden:"76355082444068"},"Petal Moth":{normal:"129488213450565",golden:"129795633049651"},
+"Pet Stack":{normal:"93856946694401",golden:"120521272308769"},"Phoenix":{normal:"124071335203484",golden:"128072341628669"},
+"Pig":{normal:"77488028236584",golden:"117707700633422"},"Pink Bunny":{normal:"74463526975864",golden:"136844178886904"},
+"Pink Dragon":{normal:"115514672741245",golden:"121332113256652"},"Polar Bear":{normal:"92922411418772",golden:"105939419440008"},
+"Police":{normal:"137503678494869",golden:"105372739907180"},"Poly":{normal:"72700884296344",golden:"93448317263355"},
+"Poseidon":{normal:"98743994253100",golden:"127645386595606"},"Potion":{normal:"104282855426601",golden:"92709504870381"},
+"Pufferfish":{normal:"102535973943066",golden:"82478976789958"},"Pumpkin":{normal:"122210713243779",golden:"78051815168026"},
+"Purple Block":{normal:"85197430643721",golden:"89522033885726"},"Purple Jellyfish":{normal:"106815127190613",golden:""},
+"Purple Wizard":{normal:"73708275676081",golden:"136041621955734"},"Raccoon":{normal:"133670805606540",golden:"116748290185469"},
+"Red Balloon":{normal:"85089096287772",golden:"123186267721451"},"Red Block":{normal:"72703734678126",golden:"93249015356323"},
+"Red Dominus":{normal:"80668814104411",golden:"140474216447875"},"Red Dragon":{normal:"81150664129187",golden:"139237924468100"},
+"Red Gift":{normal:"83024215739441",golden:"87303144794016"},"Red Hydominus":{normal:"87628019936527",golden:"98677711390032"},
+"Red Seahorse":{normal:"107005491414695",golden:"131209334640994"},"Red Wizard":{normal:"137646880451109",golden:"103489137221800"},
+"Reversed Cat":{normal:"73922675494304",golden:"81357439369166"},"Reversed Dog":{normal:"117279998342366",golden:"97215825622232"},
+"Robot":{normal:"90921981760627",golden:"85711280351756"},"Rocket":{normal:"128841860819708",golden:"109639481256119"},
+"Royal Trophy":{normal:"86641601932786",golden:"105437674254154"},"Sakura Turtle":{normal:"115616671857870",golden:"123926326820954"},
+"Sea Serpent":{normal:"71536090153177",golden:"130964729366215"},"Seal":{normal:"112684814892826",golden:"125099433521514"},
+"Seraph":{normal:"89893642524349",golden:"114337109149067"},"Shard":{normal:"84730751363511",golden:"122788500607555"},
+"Shark":{normal:"86472498546769",golden:"77018257077962"},"Shattered Shard":{normal:"79508552582319",golden:"122824710296680"},
+"Shell":{normal:"124964487894708",golden:"130422696730488"},"Skier":{normal:"133308426943862",golden:"120434292874646"},
+"Slime":{normal:"89345627737735",golden:"79904489822837"},"Snake":{normal:"123785830108382",golden:"134867555131264"},
+"Snowman":{normal:"93654987601779",golden:"122877337471961"},"Solflare":{normal:"92367578059457",golden:""},
+"Spider":{normal:"79349989622603",golden:"133256169068719"},"Squirrel":{normal:"75141867203901",golden:"134530383491041"},
+"Star Fish":{normal:"80877936356719",golden:"137763048135890"},"Starforge":{normal:"76782769566021",golden:"98578000298657"},
+"Starling Sprite":{normal:"76003912000017",golden:"135081584253373"},"Strawberry":{normal:"124916911644687",golden:"85706505195373"},
+"Summer Cat":{normal:"128065489833609",golden:"106475173582594"},"Summer Dog":{normal:"139895329802162",golden:"93908418706252"},
+"Supernova":{normal:"",golden:""},"Swimmer":{normal:"121290263315258",golden:"70941638635587"},
+"Tanuki":{normal:"124299252102658",golden:"81174950576677"},"The Clicker Trophy":{normal:"112276519898429",golden:"84069744741240"},
+"The Overlord":{normal:"97919633977640",golden:"112208344501153"},"Tiger":{normal:"95596298936664",golden:"130707019445781"},
+"Tiny Firecracker":{normal:"99747734877621",golden:"80547778168909"},"Turtle":{normal:"125290338866815",golden:"137952582924882"},
+"Turtle In A Bucket":{normal:"",golden:""},"UFO":{normal:"90296427751412",golden:"88551297638122"},
+"Unicorn":{normal:"94950279525592",golden:"86863473395481"},"Vault Keeper":{normal:"74028640057380",golden:"125432844673925"},
+"White Dominus":{normal:"107439658168566",golden:"104293526369135"},"White Hydominus":{normal:"91299199083695",golden:"103043848300099"},
+"Wolf":{normal:"138215752939932",golden:"79417623005113"},"Yellow Dragon":{normal:"84301727840608",golden:"105293219307738"},
+"Yellow Seahorse":{normal:"107722451853461",golden:""},"Yeti":{normal:"95091967341491",golden:"120696106923828"},
+"Zebra":{normal:"110421432076873",golden:"94133166454454"},"Zombie":{normal:"96637012052035",golden:"74777795511791"}
+};
+
+/* ═══════════════════ STATE ═══════════════════ */
+window.data = [];
+window.isAdmin = false;
+window.page = "home";
+window.currentPet = null;
+window.prevPage = "home";
+window.currentSort = "name-az";
+
+const DEMAND_RANK={"Super High":5,"High":4,"Medium":3,"Low":2,"No Demand":1,"?":0};
+function parseVal(v){if(!v||v==="?")return 0;const s=String(v).replace(/,/g,"");const m=s.match(/^([\d.]+)\s*([a-zA-Z]*)$/);if(!m)return parseFloat(s)||0;const n=parseFloat(m[1]);const u=m[2].toLowerCase();const units={k:1e3,m:1e6,b:1e9,t:1e12,q:1e15,qi:1e18};return n*(units[u]||1);}
+function sortPets(arr,mode){const a=[...arr];switch(mode){
+case"name-az":return a.sort((x,y)=>x.name.localeCompare(y.name));
+case"name-za":return a.sort((x,y)=>y.name.localeCompare(x.name));
+case"value-high":return a.sort((x,y)=>parseVal(y.normal)-parseVal(x.normal));
+case"value-low":return a.sort((x,y)=>parseVal(x.normal)-parseVal(y.normal));
+case"demand-high":return a.sort((x,y)=>(DEMAND_RANK[y.demand]||0)-(DEMAND_RANK[x.demand]||0));
+case"demand-low":return a.sort((x,y)=>(DEMAND_RANK[x.demand]||0)-(DEMAND_RANK[y.demand]||0));
+default:return a;}}
+
+const RARITIES = ["Basic","Rare","Epic","Legendary","Mythical","Special","Secret","Mega","Exclusive"];
+const RARITY_COLORS = {Basic:"#9ca3af",Rare:"#60a5fa",Epic:"#a78bfa",Legendary:"#fbbf24",Mythical:"#fb923c",Special:"#34d399",Secret:"#f43f5e",Mega:"#e879f9",Exclusive:"#38bdf8"};
+
+window.addEventListener("error", e => console.log("JS ERROR:", e.message));
+
+function esc(str){ const d=document.createElement("div"); d.textContent=String(str); return d.innerHTML; }
+
+/* ═══════════════ UI HELPERS ═══════════════ */
+function demandBadge(demand){
+const colors={"No Demand":"#6b7280","Low":"#4ade80","Medium":"#fbbf24","High":"#f97316","Super High":"#ef4444"};
+const d=demand||"?"; return `<span style="color:${colors[d]||"#6b7280"};font-weight:600;font-size:12px;">${esc(d)}</span>`;
+}
+
+function showInfo(petName){
+const info=PET_INFO[petName]; if(!info) return;
+const o=document.createElement("div"); o.className="info-popup";
+o.innerHTML=`<div class="info-bubble"><button class="info-close">&times;</button><h3>${esc(petName)}</h3><span class="info-status ${info.s}">${STATUS_LABELS[info.s]||info.s}</span><p>${esc(info.t)}</p></div>`;
+o.addEventListener("click",e=>{if(e.target===o)o.remove();}); o.querySelector(".info-close").addEventListener("click",()=>o.remove());
+document.body.appendChild(o);
+}
+
+/* ═══════════════ ICON LOADING ═══════════════ */
+const iconCache=new Map();
+async function loadIcon(assetId,imgEl){
+if(!assetId){imgEl.style.display="none";return;}
+if(iconCache.has(assetId)){imgEl.src=iconCache.get(assetId);imgEl.style.display="block";return;}
+try{const r=await fetch(`https://devilish-keys.devilish-codes.workers.dev/api/thumbnails?ids=${assetId}`);const j=await r.json();
+const url=j.data&&j.data[0]&&j.data[0].imageUrl;
+if(url){iconCache.set(assetId,url);imgEl.src=url;imgEl.style.display="block";}else{imgEl.style.display="none";}
+}catch(e){imgEl.style.display="none";}
+}
+
+const iconObserver=new IntersectionObserver((entries)=>{
+entries.forEach(en=>{if(en.isIntersecting){const wrap=en.target;const img=wrap.querySelector("img[data-asset]");if(img&&img.dataset.asset)loadIcon(img.dataset.asset,img);iconObserver.unobserve(wrap);}});
+},{rootMargin:"200px"});
+
+/* ═══════════════ STAT CALCULATOR ═══════════════ */
+function calcStats(petName,level,variant,shiny,mutations){
+const base=PET_STATS[petName]; if(!base) return null;
+const lm=1+(level/50)*0.5, vm={Normal:1,Golden:2,Rainbow:4}[variant], sm=shiny?1.25:1;
+let mm=1; if(mutations.Wet)mm*=1.25; if(mutations.Bloodmoon)mm*=1.4; if(mutations.Thunderstorm)mm*=1.4; if(mutations.UpsideDown)mm*=1.4;
+const t=lm*vm*sm*mm;
+return{Clicks:base.Clicks?Math.floor(base.Clicks*t):0,Shells:base.Shells?Math.floor(base.Shells*t):0,Gems:base.Gems?Math.floor(base.Gems*t):0,multiplier:t};
+}
+
+function formatNum(n){if(n>=1e12)return(n/1e12).toFixed(1)+"T";if(n>=1e9)return(n/1e9).toFixed(1)+"B";if(n>=1e6)return(n/1e6).toFixed(1)+"M";if(n>=1e3)return(n/1e3).toFixed(1)+"K";return n.toLocaleString();}
+
+function updateCalcResults(petName){
+const level=parseInt(document.getElementById("levelSlider").value);
+const variant=document.querySelector('input[name="variant"]:checked').value;
+const shiny=document.getElementById("shinyCheck").checked;
+const mutations={};document.querySelectorAll(".mut-check").forEach(c=>{mutations[c.value]=c.checked;});
+const result=calcStats(petName,level,variant,shiny,mutations);
+if(!result){document.getElementById("calcResults").innerHTML='<p style="color:var(--text-3);">No stat data available.</p>';document.getElementById("multBreakdown").textContent="";return;}
+const stats=PET_STATS[petName];let h="";
+if(stats.Clicks)h+=`<div class="stat-card"><div class="stat-label">Clicks</div><div class="stat-num">${formatNum(result.Clicks)}</div></div>`;
+if(stats.Shells)h+=`<div class="stat-card"><div class="stat-label">Shells</div><div class="stat-num">${formatNum(result.Shells)}</div></div>`;
+if(stats.Gems)h+=`<div class="stat-card"><div class="stat-label">Gems</div><div class="stat-num">${formatNum(result.Gems)}</div></div>`;
+document.getElementById("calcResults").innerHTML=h;
+const lm=(1+(level/50)*0.5).toFixed(2),vm={Normal:1,Golden:2,Rainbow:4}[variant],sm=shiny?1.25:1;
+const am=Object.entries(mutations).filter(([,v])=>v).map(([k])=>k);
+document.getElementById("multBreakdown").textContent=`Total: ${result.multiplier.toFixed(2)}\u00d7 (Level ${lm}\u00d7 \u00b7 Variant ${vm}\u00d7 \u00b7 Shiny ${sm}\u00d7 \u00b7 Muts: ${am.join(", ")||"none"})`;
+updateIconEffects(petName,variant,shiny,mutations);
+}
+
+function updateIconEffects(petName,variant,shiny,mutations){
+const icons=PET_ICONS[petName];const img=document.getElementById("petIcon");const wrap=document.getElementById("petIconWrap");
+if(!icons||!img)return;
+let assetId=icons.normal;if(variant==="Golden"&&icons.golden)assetId=icons.golden;
+if(assetId&&assetId!==img.dataset.assetId){img.dataset.assetId=assetId;loadIcon(assetId,img);}
+let f=[];
+if(variant==="Golden"&&!icons.golden)f.push("sepia(1) saturate(3) brightness(1.1) hue-rotate(15deg)");
+if(mutations.Wet)f.push("saturate(1.3) hue-rotate(20deg)");
+if(mutations.Bloodmoon)f.push("saturate(1.5) hue-rotate(-15deg)");
+if(mutations.Thunderstorm)f.push("brightness(1.2) contrast(1.1)");
+img.classList.toggle("icon-rainbow",variant==="Rainbow");
+img.style.filter=variant==="Rainbow"?"":(f.length?f.join(" "):"");
+img.style.transform=mutations.UpsideDown?"scaleY(-1)":"";
+wrap.style.animation=shiny?"shinyPulse 1.5s ease-in-out infinite":"";
+}
+
+/* ═══════════════ PET DETAIL MODAL ═══════════════ */
+function showPetPage(petName){
+window.currentPet=petName;
+const pet=ALL_PETS.find(p=>p.name===petName);
+const info=PET_INFO[petName];
+const petData=window.data.find(p=>p.name===petName);
+document.getElementById("petNameTitle").textContent=petName;
+document.getElementById("petRarityLabel").textContent=pet?pet.rarity:"Unknown";
+document.getElementById("petRarityLabel").style.color=pet?RARITY_COLORS[pet.rarity]:"";
+const sl=document.getElementById("petStatusLine");
+sl.innerHTML=info?`Status: <span class="info-status ${info.s}">${STATUS_LABELS[info.s]||info.s}</span>`:"";
+document.getElementById("petDemandLine").innerHTML=petData&&petData.demand?`Demand: ${demandBadge(petData.demand)}`:"";
+document.getElementById("petDescLine").textContent=info?info.t:"";
+const vr=document.getElementById("petValuesRow");
+vr.innerHTML=petData
+?`<div class="pet-val-card"><div class="val-label">Normal</div><div class="val-num">${esc(petData.normal)}</div></div>`+
+`<div class="pet-val-card"><div class="val-label">Golden</div><div class="val-num">${esc(petData.golden)}</div></div>`+
+`<div class="pet-val-card"><div class="val-label">Rainbow</div><div class="val-num">${esc(petData.rainbow)}</div></div>`
+:'<p style="color:var(--text-3);">No value data yet.</p>';
+document.getElementById("levelSlider").value=0;document.getElementById("levelDisplay").textContent="0";
+document.querySelector('input[name="variant"][value="Normal"]').checked=true;
+document.getElementById("shinyCheck").checked=false;document.querySelectorAll(".mut-check").forEach(c=>c.checked=false);
+const icons=PET_ICONS[petName];const img=document.getElementById("petIcon");const wrap=document.getElementById("petIconWrap");
+img.style.display="none";img.dataset.assetId="";img.style.filter="";img.style.transform="";img.classList.remove("icon-rainbow");wrap.style.animation="";
+if(icons&&icons.normal){img.dataset.assetId=icons.normal;loadIcon(icons.normal,img);}
+updateCalcResults(petName);
+document.getElementById("petModal").style.display="flex";
+}
+
+function closePetModal(){document.getElementById("petModal").style.display="none";window.currentPet=null;}
+document.getElementById("modalClose").addEventListener("click",closePetModal);
+document.getElementById("petModal").addEventListener("click",e=>{if(e.target.id==="petModal")closePetModal();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.getElementById("petModal").style.display==="flex")closePetModal();});
+
+document.getElementById("levelSlider").addEventListener("input",e=>{document.getElementById("levelDisplay").textContent=e.target.value;if(window.currentPet)updateCalcResults(window.currentPet);});
+document.querySelectorAll('input[name="variant"]').forEach(r=>{r.addEventListener("change",()=>{if(window.currentPet)updateCalcResults(window.currentPet);});});
+document.getElementById("shinyCheck").addEventListener("change",()=>{if(window.currentPet)updateCalcResults(window.currentPet);});
+document.querySelectorAll(".mut-check").forEach(c=>{c.addEventListener("change",()=>{if(window.currentPet)updateCalcResults(window.currentPet);});});
+
+/* ═══════════════ RENDERING ═══════════════ */
+function staggerReveal(container,selector){
+container.querySelectorAll(selector).forEach((el,i)=>{el.classList.add("reveal");el.style.animationDelay=`${0.03+i*0.03}s`;});
+}
+
+function buildCard(p){
+const icons=PET_ICONS[p.name];const hasIcon=icons&&icons.normal;const hasInfo=PET_INFO[p.name];
+const card=document.createElement("div");card.className="pet-card";
+card.innerHTML=
+`<div class="pet-card-icon"><img data-asset="${hasIcon?icons.normal:""}" alt="${esc(p.name)}" style="display:none;"></div>`+
+`<div class="pet-card-name">${esc(p.name)}</div>`+
+`<div class="pet-card-values"><div class="pcv"><span class="pcv-label">N</span><span class="pcv-val">${esc(p.normal||"?")}</span></div><div class="pcv"><span class="pcv-label">G</span><span class="pcv-val">${esc(p.golden||"?")}</span></div><div class="pcv"><span class="pcv-label">R</span><span class="pcv-val">${esc(p.rainbow||"?")}</span></div></div>`+
+`<div class="pet-card-demand">${demandBadge(p.demand)}</div>`+
+(hasInfo?`<button class="pet-card-info" data-pet="${esc(p.name)}">i</button>`:"")+
+(window.isAdmin?`<button class="pet-card-del" data-id="${esc(p.id)}">&times;</button>`:"");
+card.addEventListener("click",e=>{if(!e.target.closest(".pet-card-info")&&!e.target.closest(".pet-card-del"))showPetPage(p.name);});
+const infoBtn=card.querySelector(".pet-card-info");if(infoBtn)infoBtn.addEventListener("click",e=>{e.stopPropagation();showInfo(p.name);});
+const delBtn=card.querySelector(".pet-card-del");if(delBtn)delBtn.addEventListener("click",e=>{e.stopPropagation();deletePet(p.id);});
+return card;
+}
+
+function render(rarity){
+const grid=document.getElementById("petGrid");grid.innerHTML="";
+document.getElementById("rarityTitle").textContent=rarity;
+document.getElementById("rarityDot").style.background=RARITY_COLORS[rarity]||"#9ca3af";
+const pets=sortPets(window.data.filter(p=>p.rarity===rarity),window.currentSort);
+document.getElementById("listCount").textContent=`${pets.length} pets`;
+pets.forEach(p=>{grid.appendChild(buildCard(p));});
+grid.querySelectorAll(".pet-card-icon").forEach(wrap=>{if(wrap.querySelector("img").dataset.asset)iconObserver.observe(wrap);});
+staggerReveal(grid,".pet-card");
+}
+
+function renderSearch(query){
+const grid=document.getElementById("searchGrid");const nr=document.getElementById("noResults");const sh=document.getElementById("searchHeader");
+grid.innerHTML="";
+const q=query.toLowerCase();const matches=q?window.data.filter(p=>p.name.toLowerCase().includes(q)):[];
+if(!q){nr.style.display="none";sh.textContent="";return;}
+if(!matches.length){nr.style.display="block";sh.innerHTML=`No results for "<strong>${esc(query)}</strong>"`;return;}
+nr.style.display="none";sh.innerHTML=`<strong>${matches.length}</strong> results for "<strong>${esc(query)}</strong>"`;
+sortPets(matches,window.currentSort).forEach(p=>{grid.appendChild(buildCard(p));});
+grid.querySelectorAll(".pet-card-icon").forEach(wrap=>{if(wrap.querySelector("img").dataset.asset)iconObserver.observe(wrap);});
+staggerReveal(grid,".pet-card");
+}
+
+function renderAll(){
+const grid=document.getElementById("allGrid");grid.innerHTML="";
+const pets=sortPets(window.data,window.currentSort);
+document.getElementById("allCount").textContent=`${pets.length} pets`;
+pets.forEach(p=>{grid.appendChild(buildCard(p));});
+grid.querySelectorAll(".pet-card-icon").forEach(wrap=>{if(wrap.querySelector("img").dataset.asset)iconObserver.observe(wrap);});
+staggerReveal(grid,".pet-card");
+}
+
+/* ═══════════════ NAVIGATION ═══════════════ */
+function showPage(id){document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));const el=document.getElementById(id);if(el)el.classList.add("active");}
+
+function goPage(page,pushState){
+window.prevPage=window.page;window.page=page;
+document.getElementById("rarityMenu").classList.remove("open");
+updateActiveTabs(page);
+if(pushState!==false){const hash=page==="home"?"":page;history.pushState(null,"","#"+hash);}
+if(page==="home"){showPage("homePage");}
+else if(page==="all"){showPage("allPage");renderAll();}
+else if(page==="search"){showPage("searchPage");renderSearch("");}
+else{showPage("listPage");render(page);}
+}
+
+function updateActiveTabs(page){
+document.querySelectorAll(".nav-tab").forEach(t=>{t.classList.remove("active");if(t.dataset.page===page)t.classList.add("active");});
+}
+
+/* ═══════════════ BUILD NAV & HOME ═══════════════ */
+const rarityMenu=document.getElementById("rarityMenu");
+RARITIES.forEach(r=>{
+const btn=document.createElement("button");
+btn.innerHTML=`<span class="rarity-dot" style="background:${RARITY_COLORS[r]}"></span> ${r}`;
+btn.addEventListener("click",()=>goPage(r));
+rarityMenu.appendChild(btn);
+});
+
+document.querySelectorAll(".nav-tab[data-page]").forEach(tab=>{tab.addEventListener("click",()=>goPage(tab.dataset.page));});
+document.getElementById("rarityBtn").addEventListener("click",e=>{e.stopPropagation();rarityMenu.classList.toggle("open");});
+document.addEventListener("click",e=>{if(!e.target.closest(".nav-dd"))rarityMenu.classList.remove("open");if(!e.target.closest(".sort-dd"))document.querySelectorAll(".sort-menu").forEach(m=>m.classList.remove("open"));});
+
+/* Sort buttons (all sort menus) */
+function applySort(mode){
+window.currentSort=mode;
+document.querySelectorAll(".sort-menu button").forEach(b=>{b.classList.toggle("active",b.dataset.sort===mode);});
+if(window.page==="all")renderAll();
+else if(window.page==="search"){const q=document.getElementById("headerSearch").value;if(q)renderSearch(q);}
+else if(window.page!=="home")render(window.page);
+}
+document.querySelectorAll(".sort-btn").forEach(btn=>{btn.addEventListener("click",e=>{e.stopPropagation();const menu=btn.nextElementSibling;document.querySelectorAll(".sort-menu").forEach(m=>{if(m!==menu)m.classList.remove("open");});menu.classList.toggle("open");});});
+document.querySelectorAll(".sort-menu button").forEach(btn=>{btn.addEventListener("click",e=>{e.stopPropagation();applySort(btn.dataset.sort);btn.closest(".sort-menu").classList.remove("open");});});
+
+const rarityGrid=document.getElementById("rarityGrid");
+RARITIES.forEach(r=>{
+const count=ALL_PETS.filter(p=>p.rarity===r).length;
+const card=document.createElement("button");card.className="rarity-card";
+card.innerHTML=`<span class="rarity-dot" style="background:${RARITY_COLORS[r]}"></span><span>${r}</span><span class="rarity-card-count">${count}</span>`;
+card.addEventListener("click",()=>goPage(r));
+rarityGrid.appendChild(card);
+});
+
+/* ═══════════════ SEARCH ═══════════════ */
+document.getElementById("heroSearch").addEventListener("input",e=>{
+const v=e.target.value;
+if(!v.trim()){goPage("all");return;}
+if(window.page!=="search")goPage("search");
+document.getElementById("headerSearch").value=v;
+const hs=document.getElementById("headerSearch");
+if(hs.offsetParent!==null)hs.focus();
+renderSearch(v);
+history.replaceState(null,"","#search?q="+encodeURIComponent(v));
+});
+document.getElementById("headerSearch").addEventListener("input",e=>{
+const v=e.target.value;
+if(!v.trim()){goPage("all");return;}
+if(window.page!=="search")goPage("search");
+renderSearch(v);document.getElementById("heroSearch").value=v;
+history.replaceState(null,"","#search?q="+encodeURIComponent(v));
+});
+
+/* ═══════════════ FIRESTORE ═══════════════ */
+async function loadPets(){
+try{const snap=await getDocs(collection(db,"pets"));window.data=[];
+snap.forEach(d=>{window.data.push({id:d.id,...d.data()});});
+if(window.page==="all")renderAll();
+else if(window.page!=="home"&&window.page!=="search")render(window.page);
+}catch(err){console.log("Firestore load error:",err.message);}
+}
+
+window.seedPets=async function(){
+if(!window.isAdmin){alert("Not admin");return;}if(!confirm("Seed all 184 pets?"))return;
+const existing=new Set(window.data.map(p=>p.name.toLowerCase().replace(/[^a-z0-9]/g,"_")));let added=0;
+const batch=writeBatch(db);
+for(const pet of ALL_PETS){const docId=pet.name.toLowerCase().replace(/[^a-z0-9]/g,"_");if(existing.has(docId))continue;
+const isLow=["Basic","Rare","Epic","Legendary"].includes(pet.rarity);
+batch.set(doc(db,"pets",docId),{name:pet.name,rarity:pet.rarity,normal:isLow?"0":"?",golden:isLow?"0":"?",rainbow:isLow?"0":"?",demand:isLow?"No Demand":"?"});added++;}
+if(!added){alert("All pets already exist.");return;}
+try{await batch.commit();await loadPets();alert("Seeded "+added+" pets!");}catch(err){alert("Seed failed: "+err.message);}
+};
+
+window.setDemandValues=async function(){
+if(!window.isAdmin){alert("Not admin");return;}if(!confirm("Set demand values?"))return;
+const low=new Set(["Basic","Rare","Epic","Legendary"]);const batch=writeBatch(db);
+for(const pet of window.data){const ref=doc(db,"pets",pet.id);
+if(low.has(pet.rarity))batch.set(ref,{normal:"0",golden:"0",rainbow:"0",demand:"No Demand"},{merge:true});
+else batch.set(ref,{demand:pet.demand||"?"},{merge:true});}
+try{await batch.commit();await loadPets();alert("Updated!");}catch(err){alert("Failed: "+err.message);}
+};
+
+window.addPet=async function(){
+if(!window.isAdmin){alert("Not admin");return;}
+const n=document.getElementById("name").value.trim(),no=document.getElementById("normal").value.trim();
+const g=document.getElementById("golden").value.trim(),r=document.getElementById("rainbow").value.trim();
+const ra=document.getElementById("rarity").value,dem=document.getElementById("demand").value;
+if(!n||!no){alert("Fill required fields");return;}
+const docId=n.toLowerCase().replace(/[^a-z0-9]/g,"_");
+try{await setDoc(doc(db,"pets",docId),{name:n,normal:no,golden:g,rainbow:r,rarity:ra,demand:dem});
+await loadPets();["name","normal","golden","rainbow"].forEach(id=>document.getElementById(id).value="");document.getElementById("demand").value="?";alert("Saved!");
+}catch(err){alert("Save failed: "+err.message);}
+};
+
+async function deletePet(id){
+if(!window.isAdmin)return;if(!confirm("Delete this pet?"))return;
+try{await deleteDoc(doc(db,"pets",id));await loadPets();}catch(err){alert("Delete failed: "+err.message);}
+}
+
+/* ═══════════════ ADMIN (HIDDEN) ═══════════════ */
+const adminPanel=document.getElementById("adminPanel");
+function toggleAdmin(){adminPanel.classList.toggle("open");}
+
+// Triple-tap logo = admin (touch/mobile only)
+(function(){let taps=0,timer;document.getElementById("logoArea").addEventListener("touchend",e=>{taps++;if(taps===1)timer=setTimeout(()=>{taps=0;},600);if(taps===3){clearTimeout(timer);taps=0;toggleAdmin();}});})();
+
+// Mobile "Edit Home Page" button in admin panel
+document.getElementById("mobileEditHomeBtn").addEventListener("click",()=>{adminPanel.classList.remove("open");toggleHomeEditor();});
+
+// Alt+Shift+P = admin, Alt+Shift+M = super admin, Alt+Shift+E = home editor
+document.addEventListener("keydown",e=>{
+if(e.altKey&&e.shiftKey&&e.key==="P"){e.preventDefault();toggleAdmin();}
+if(e.altKey&&e.shiftKey&&e.key==="M"){e.preventDefault();document.getElementById("superAdminPanel").classList.toggle("open");}
+if(e.altKey&&e.shiftKey&&e.key==="E"){e.preventDefault();if(window.isAdmin)toggleHomeEditor();}
+});
+
+document.getElementById("adminClose").addEventListener("click",()=>adminPanel.classList.remove("open"));
+document.getElementById("superAdminClose").addEventListener("click",()=>document.getElementById("superAdminPanel").classList.remove("open"));
+document.getElementById("loginBtn").addEventListener("click",()=>{
+const e=document.getElementById("email").value,p=document.getElementById("password").value;
+signInWithEmailAndPassword(auth,e,p).then(()=>{document.getElementById("email").value="";document.getElementById("password").value="";}).catch(err=>alert(err.message));
+});
+document.getElementById("logoutBtn").addEventListener("click",()=>signOut(auth).catch(err=>alert(err.message)));
+document.getElementById("addPetBtn").addEventListener("click",()=>window.addPet());
+document.getElementById("seedBtn").addEventListener("click",()=>window.seedPets());
+document.getElementById("demandBtn").addEventListener("click",()=>window.setDemandValues());
+
+onAuthStateChanged(auth,user=>{
+window.isAdmin=!!user;document.getElementById("adminTools").style.display=user?"block":"none";
+document.getElementById("adminLogin").style.display=user?"none":"block";
+document.getElementById("adminTitle").textContent=user?"Admin Panel":"Admin Login";
+document.getElementById("mobileEditHomeBtn").style.display=user?"":"none";
+document.getElementById("superAdminTools").style.display=user?"block":"none";
+document.getElementById("superAdminMsg").style.display=user?"none":"block";
+if(window.page==="all")renderAll();
+else if(window.page!=="home"&&window.page!=="search")render(window.page);
+});
+
+/* NAME AUTOCOMPLETE */
+const nameInput=document.getElementById("name");const suggestions=document.getElementById("nameSuggestions");
+nameInput.addEventListener("input",()=>{
+const q=nameInput.value.trim().toLowerCase();suggestions.innerHTML="";
+if(!q){suggestions.style.display="none";return;}
+const m=window.data.filter(p=>p.name.toLowerCase().includes(q)).slice(0,8);
+if(!m.length){suggestions.style.display="none";return;}
+suggestions.style.display="block";
+m.forEach(p=>{const d=document.createElement("div");d.textContent=p.name+" ("+p.rarity+")";
+d.addEventListener("click",()=>{nameInput.value=p.name;document.getElementById("normal").value=p.normal||"";
+document.getElementById("golden").value=p.golden||"";document.getElementById("rainbow").value=p.rainbow||"";
+document.getElementById("rarity").value=p.rarity||"Basic";document.getElementById("demand").value=p.demand||"?";suggestions.style.display="none";});
+suggestions.appendChild(d);});
+});
+nameInput.addEventListener("blur",()=>{setTimeout(()=>{suggestions.style.display="none";},150);});
+
+/* ═══════════════ HOME EDITOR ═══════════════ */
+const homeEditor=document.getElementById("homeEditor");
+const HE_DEFAULTS={title:"Clicker Sim|Value List",sub:"The definitive trading reference. Browse values, check stats, and master the market.",s1n:"184",s1l:"Total Pets",s2n:"9",s2l:"Rarities",s3n:"3",s3l:"Variants",banner:""};
+
+let toggleHomeEditor=function(){
+homeEditor.classList.toggle("open");
+if(homeEditor.classList.contains("open"))loadHomeConfig();
+};
+document.getElementById("homeEditorClose").addEventListener("click",()=>{homeEditor.classList.remove("open");setTbEditMode(false);});
+
+function applyHomeConfig(cfg){
+const c={...HE_DEFAULTS,...cfg};
+document.getElementById("heroTitle").innerHTML=esc(c.title).replace(/\|/g,"<br>");
+document.getElementById("heroSub").textContent=c.sub;
+document.getElementById("totalPets").textContent=c.s1n;document.getElementById("stat1Label").textContent=c.s1l;
+document.getElementById("stat2Num").textContent=c.s2n;document.getElementById("stat2Label").textContent=c.s2l;
+document.getElementById("stat3Num").textContent=c.s3n;document.getElementById("stat3Label").textContent=c.s3l;
+const banner=document.getElementById("homeBanner");
+if(c.banner){banner.textContent=c.banner;banner.style.display="block";}else{banner.style.display="none";}
+if(c.textBoxes&&Array.isArray(c.textBoxes)){textBoxes=c.textBoxes.map(t=>({...t}));renderTextBoxes();}
+}
+
+function fillEditorFields(cfg){
+const c={...HE_DEFAULTS,...cfg};
+document.getElementById("heTitle").value=c.title;document.getElementById("heSub").value=c.sub;
+document.getElementById("heStat1Num").value=c.s1n;document.getElementById("heStat1Label").value=c.s1l;
+document.getElementById("heStat2Num").value=c.s2n;document.getElementById("heStat2Label").value=c.s2l;
+document.getElementById("heStat3Num").value=c.s3n;document.getElementById("heStat3Label").value=c.s3l;
+document.getElementById("heBanner").value=c.banner;
+document.getElementById("heBannerPreview").textContent=c.banner||"No banner";
+}
+
+function readEditorFields(){
+return{title:document.getElementById("heTitle").value,sub:document.getElementById("heSub").value,
+s1n:document.getElementById("heStat1Num").value,s1l:document.getElementById("heStat1Label").value,
+s2n:document.getElementById("heStat2Num").value,s2l:document.getElementById("heStat2Label").value,
+s3n:document.getElementById("heStat3Num").value,s3l:document.getElementById("heStat3Label").value,
+banner:document.getElementById("heBanner").value};
+}
+
+async function loadHomeConfig(){
+try{const snap=await getDoc(doc(db,"config","home"));
+const cfg=snap.exists()?snap.data():{};fillEditorFields(cfg);applyHomeConfig(cfg);
+}catch(err){console.log("Load home config error:",err.message);fillEditorFields({});}
+}
+
+// Live preview on any input change
+["heTitle","heSub","heStat1Num","heStat1Label","heStat2Num","heStat2Label","heStat3Num","heStat3Label","heBanner"].forEach(id=>{
+document.getElementById(id).addEventListener("input",()=>{
+const cfg=readEditorFields();applyHomeConfig(cfg);
+document.getElementById("heBannerPreview").textContent=cfg.banner||"No banner";
+});});
+
+/* ─── TEXT BOXES ─── */
+let textBoxes=[];
+let tbEditMode=false;
+const tbContainer=document.getElementById("tbContainer");
+const TB_FONTS=["Inter","Space Grotesk","Georgia","Times New Roman","Courier New","Arial","Verdana","Impact","Comic Sans MS"];
+
+function tbId(){return"tb_"+Date.now()+"_"+Math.random().toString(36).slice(2,6);}
+
+function createTbEl(tb){
+const el=document.createElement("div");
+el.className="text-box"+(tbEditMode?" editing":"");
+el.id=tb.id;
+el.style.cssText=`left:${tb.x}px;top:${tb.y}px;width:${tb.w||250}px;${tb.h?'height:'+tb.h+'px;':''}`;
+el.innerHTML=`<div class="tb-handle">
+<select class="tb-font" title="Font">${TB_FONTS.map(f=>`<option value="${f}"${tb.font===f?' selected':''}>${f}</option>`).join("")}</select>
+<select class="tb-size" title="Size">${[10,12,14,16,18,20,24,28,32,40,48].map(s=>`<option value="${s}"${(tb.size||14)==s?' selected':''}>${s}</option>`).join("")}</select>
+<input type="color" class="tb-color" value="${tb.color||'#ffffff'}" title="Text color">
+<button class="tb-b" title="Bold"><b>B</b></button>
+<button class="tb-i" title="Italic"><i>I</i></button>
+<button class="tb-u" title="Underline"><u>U</u></button>
+<button class="tb-al" title="Align left">&#9776;</button>
+<button class="tb-ac" title="Align center">&#9776;</button>
+<button class="tb-del" title="Delete">&#215;</button>
+</div>
+<div class="tb-body" contenteditable="${tbEditMode}" style="font-family:'${tb.font||'Inter'}',sans-serif;font-size:${tb.size||14}px;color:${tb.color||'#ffffff'};outline:none;min-height:24px;">${tb.html||'Click to edit...'}</div>
+<div class="tb-resize"></div>`;
+return el;
+}
+
+function bindTbEvents(el,tb){
+const body=el.querySelector(".tb-body");
+const handle=el.querySelector(".tb-handle");
+// Toolbar buttons
+handle.querySelector(".tb-b").addEventListener("mousedown",e=>{e.preventDefault();document.execCommand("bold");});
+handle.querySelector(".tb-i").addEventListener("mousedown",e=>{e.preventDefault();document.execCommand("italic");});
+handle.querySelector(".tb-u").addEventListener("mousedown",e=>{e.preventDefault();document.execCommand("underline");});
+handle.querySelector(".tb-al").addEventListener("mousedown",e=>{e.preventDefault();document.execCommand("justifyLeft");});
+handle.querySelector(".tb-ac").addEventListener("mousedown",e=>{e.preventDefault();document.execCommand("justifyCenter");});
+handle.querySelector(".tb-font").addEventListener("change",e=>{body.style.fontFamily="'"+e.target.value+"',sans-serif";tb.font=e.target.value;});
+handle.querySelector(".tb-size").addEventListener("change",e=>{body.style.fontSize=e.target.value+"px";tb.size=parseInt(e.target.value);});
+handle.querySelector(".tb-color").addEventListener("input",e=>{document.execCommand("foreColor",false,e.target.value);tb.color=e.target.value;});
+handle.querySelector(".tb-del").addEventListener("click",()=>{if(!confirm("Delete this text box?"))return;textBoxes=textBoxes.filter(t=>t.id!==tb.id);el.remove();renderTbList();});
+// Content sync
+body.addEventListener("input",()=>{tb.html=body.innerHTML;});
+// Drag (mouse + touch)
+let dragging=false,dx=0,dy=0;
+function dragStart(cx,cy,e){if(e&&e.target.closest("button,select,input"))return;dragging=true;const r=el.getBoundingClientRect();dx=cx-r.left;dy=cy-r.top;}
+function dragMove(cx,cy){if(!dragging)return;const cr=tbContainer.getBoundingClientRect();tb.x=Math.max(0,cx-cr.left-dx);tb.y=Math.max(0,cy-cr.top-dy);el.style.left=tb.x+"px";el.style.top=tb.y+"px";}
+handle.addEventListener("mousedown",e=>{dragStart(e.clientX,e.clientY,e);e.preventDefault();});
+handle.addEventListener("touchstart",e=>{const t=e.touches[0];dragStart(t.clientX,t.clientY,e);},{passive:true});
+document.addEventListener("mousemove",e=>{dragMove(e.clientX,e.clientY);});
+document.addEventListener("touchmove",e=>{if(!dragging)return;const t=e.touches[0];dragMove(t.clientX,t.clientY);e.preventDefault();},{passive:false});
+document.addEventListener("mouseup",()=>{dragging=false;});
+document.addEventListener("touchend",()=>{dragging=false;});
+// Resize (mouse + touch)
+const resizeHandle=el.querySelector(".tb-resize");
+let resizing=false;
+function resizeMove(cx,cy){if(!resizing)return;const cr=el.getBoundingClientRect();tb.w=Math.max(80,cx-cr.left+4);tb.h=Math.max(30,cy-cr.top+4);el.style.width=tb.w+"px";el.style.height=tb.h+"px";}
+resizeHandle.addEventListener("mousedown",e=>{resizing=true;e.preventDefault();e.stopPropagation();});
+resizeHandle.addEventListener("touchstart",e=>{resizing=true;e.preventDefault();e.stopPropagation();});
+document.addEventListener("mousemove",e=>{resizeMove(e.clientX,e.clientY);});
+document.addEventListener("touchmove",e=>{if(!resizing)return;const t=e.touches[0];resizeMove(t.clientX,t.clientY);e.preventDefault();},{passive:false});
+document.addEventListener("mouseup",()=>{resizing=false;});
+document.addEventListener("touchend",()=>{resizing=false;});
+}
+
+function renderTextBoxes(){
+tbContainer.innerHTML="";
+textBoxes.forEach(tb=>{const el=createTbEl(tb);tbContainer.appendChild(el);if(tbEditMode)bindTbEvents(el,tb);});
+renderTbList();
+clampTextBoxes();
+}
+
+function renderTbList(){
+const list=document.getElementById("heTbList");list.innerHTML="";
+textBoxes.forEach((tb,i)=>{
+const item=document.createElement("div");item.className="he-tb-item";
+const preview=(tb.html||"").replace(/<[^>]*>/g,"").slice(0,30)||"Empty";
+item.innerHTML=`<span>Box ${i+1}: ${esc(preview)}</span><button class="tb-item-del" data-idx="${i}">&times;</button>`;
+item.querySelector(".tb-item-del").addEventListener("click",e=>{e.stopPropagation();if(!confirm("Delete text box?"))return;textBoxes.splice(i,1);renderTextBoxes();});
+item.addEventListener("click",()=>{const el=document.getElementById(tb.id);if(el)el.querySelector(".tb-body").focus();});
+list.appendChild(item);
+});
+}
+
+function setTbEditMode(on){
+tbEditMode=on;
+tbContainer.querySelectorAll(".text-box").forEach(el=>{el.classList.toggle("editing",on);el.querySelector(".tb-body").contentEditable=on;});
+if(on)renderTextBoxes();
+}
+
+function collectTbData(){return textBoxes.map(tb=>({id:tb.id,x:tb.x,y:tb.y,w:tb.w,h:tb.h||0,html:tb.html,font:tb.font,size:tb.size,color:tb.color}));}
+
+function clampTextBoxes(){
+const cw=tbContainer.getBoundingClientRect().width;
+if(!cw)return;
+textBoxes.forEach(tb=>{
+const el=document.getElementById(tb.id);if(!el)return;
+const maxW=cw-16;
+if(tb.w>maxW){tb.w=Math.max(80,maxW);el.style.width=tb.w+"px";}
+if(tb.x+tb.w>cw){tb.x=Math.max(0,cw-tb.w);el.style.left=tb.x+"px";}
+});
+}
+window.addEventListener("resize",clampTextBoxes);
+
+document.getElementById("heAddTbBtn").addEventListener("click",()=>{
+const rect=tbContainer.getBoundingClientRect();
+const cx=Math.max(0,Math.round((rect.width-420)/2));
+const cy=Math.max(0,Math.round(rect.height/2-30));
+const tb={id:tbId(),x:cx,y:cy,w:420,h:0,html:"New text box",font:"Inter",size:14,color:"#ffffff"};
+textBoxes.push(tb);renderTextBoxes();
+const el=document.getElementById(tb.id);if(el)el.querySelector(".tb-body").focus();
+});
+
+// Toggle edit mode when editor opens/closes
+const origToggleHE=toggleHomeEditor;
+toggleHomeEditor=function(){
+const wasOpen=homeEditor.classList.contains("open");
+origToggleHE();
+const isOpen=homeEditor.classList.contains("open");
+if(isOpen&&!wasOpen)setTbEditMode(true);
+if(!isOpen&&wasOpen)setTbEditMode(false);
+};
+
+document.getElementById("heSaveBtn").addEventListener("click",async()=>{
+if(!window.isAdmin){alert("Not admin");return;}
+const cfg=readEditorFields();cfg.textBoxes=collectTbData();
+try{await setDoc(doc(db,"config","home"),cfg);alert("Home page saved!");}
+catch(err){alert("Save failed: "+err.message);}
+});
+
+document.getElementById("heResetBtn").addEventListener("click",async()=>{
+if(!window.isAdmin){alert("Not admin");return;}
+if(!confirm("Reset home page to defaults?"))return;
+const resetCfg={...HE_DEFAULTS,textBoxes:[]};
+try{await setDoc(doc(db,"config","home"),resetCfg);textBoxes=[];applyHomeConfig(resetCfg);fillEditorFields(resetCfg);renderTextBoxes();alert("Reset to defaults!");}
+catch(err){alert("Reset failed: "+err.message);}
+});
+
+/* ═══════════════ ROUTING ═══════════════ */
+function readHash(){const raw=location.hash.replace("#","");const [h,qs]=raw.split("?");return{page:h||"home",query:new URLSearchParams(qs||"").get("q")||""};}
+window.addEventListener("popstate",()=>{const r=readHash();goPage(r.page,false);if(r.page==="search"&&r.query){document.getElementById("headerSearch").value=r.query;renderSearch(r.query);}});
+
+/* ═══════════════ INIT ═══════════════ */
+const initRoute=readHash();
+goPage(initRoute.page,false);
+if(initRoute.page==="search"&&initRoute.query){document.getElementById("headerSearch").value=initRoute.query;renderSearch(initRoute.query);}
+loadPets();
+getDoc(doc(db,"config","home")).then(snap=>{if(snap.exists())applyHomeConfig(snap.data());}).catch(()=>{});
+
+</script>
+</body>
+</html>
