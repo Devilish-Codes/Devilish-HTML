@@ -192,6 +192,11 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 .home-editor input:focus,.home-editor textarea:focus{border-color:var(--accent-700);}
 .home-editor textarea{resize:vertical;min-height:60px;line-height:1.5;}
 .home-editor input::placeholder,.home-editor textarea::placeholder{color:var(--text-3);}
+.he-header-btns{display:flex;gap:6px;align-items:center;}
+.he-minimize{display:none;background:none;border:none;color:var(--text-2);font-size:20px;cursor:pointer;padding:2px 6px;line-height:1;}
+.he-bubble{display:none;position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent-500),var(--accent-700));color:#fff;font-size:24px;border:none;cursor:pointer;z-index:701;box-shadow:0 4px 20px rgba(168,85,247,0.5);transition:transform .2s;}
+.he-bubble:active{transform:scale(0.9);}
+.he-bubble.visible{display:flex;align-items:center;justify-content:center;}
 .he-row{display:flex;gap:8px;}
 .he-row>div{flex:1;}
 .he-banner-preview{margin:8px 0;padding:10px 14px;border-radius:10px;background:var(--glass);border:1px solid var(--glass-border);color:var(--text-2);font-size:12px;min-height:20px;white-space:pre-wrap;word-break:break-word;}
@@ -264,6 +269,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 .modal-overlay{padding:10px;align-items:flex-end;}
 .admin-panel{width:100%;}
 .home-editor{width:100%;}
+.he-minimize{display:inline-block;}
 .mobile-edit-home{display:none;margin-bottom:12px;}
 .mobile-edit-home.visible{display:block;}
 .rarity-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));max-width:none;}
@@ -485,7 +491,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 
 <!-- HOME EDITOR PANEL -->
 <div class="home-editor" id="homeEditor">
-<h3>Edit Home Page <button class="admin-close" id="homeEditorClose">&times;</button></h3>
+<h3>Edit Home Page <span class="he-header-btns"><button class="he-minimize" id="homeEditorMin" title="Minimize">&#x2015;</button><button class="admin-close" id="homeEditorClose">&times;</button></span></h3>
 <label>Title (use | for line break)</label>
 <input id="heTitle" placeholder="Clicker Sim|Value List">
 <label>Subtitle</label>
@@ -508,6 +514,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 <button class="admin-btn danger" id="heResetBtn">Reset</button>
 </div>
 </div>
+<button class="he-bubble" id="homeEditorBubble">&#9998;</button>
 
 <script type="module">
 
@@ -1272,7 +1279,11 @@ let toggleHomeEditor=function(){
 homeEditor.classList.toggle("open");
 if(homeEditor.classList.contains("open"))loadHomeConfig();
 };
-document.getElementById("homeEditorClose").addEventListener("click",()=>{homeEditor.classList.remove("open");setTbEditMode(false);});
+document.getElementById("homeEditorClose").addEventListener("click",()=>{homeEditor.classList.remove("open");setTbEditMode(false);document.getElementById("homeEditorBubble").classList.remove("visible");});
+// Minimize / bubble restore
+const heBubble=document.getElementById("homeEditorBubble");
+document.getElementById("homeEditorMin").addEventListener("click",()=>{homeEditor.classList.remove("open");heBubble.classList.add("visible");});
+heBubble.addEventListener("click",()=>{heBubble.classList.remove("visible");homeEditor.classList.add("open");});
 
 function applyHomeConfig(cfg){
 const c={...HE_DEFAULTS,...cfg};
@@ -1438,7 +1449,7 @@ const wasOpen=homeEditor.classList.contains("open");
 origToggleHE();
 const isOpen=homeEditor.classList.contains("open");
 if(isOpen&&!wasOpen)setTbEditMode(true);
-if(!isOpen&&wasOpen)setTbEditMode(false);
+if(!isOpen&&wasOpen&&!heBubble.classList.contains("visible"))setTbEditMode(false);
 };
 
 document.getElementById("heSaveBtn").addEventListener("click",async()=>{
