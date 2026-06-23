@@ -260,7 +260,8 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 .modal-overlay{padding:10px;align-items:flex-end;}
 .admin-panel{width:100%;}
 .home-editor{width:100%;}
-.mobile-edit-home{display:block!important;margin-bottom:12px;}
+.mobile-edit-home{display:none;margin-bottom:12px;}
+.mobile-edit-home.visible{display:block;}
 .rarity-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));max-width:none;}
 .sort-menu{right:auto;left:0;}
 .tb-handle{overflow-x:auto;-webkit-overflow-scrolling:touch;}
@@ -435,7 +436,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 <div class="admin-panel" id="adminPanel">
 <button class="admin-close" id="adminClose">&times;</button>
 <h3 id="adminTitle">Admin Login</h3>
-<button class="admin-btn mobile-edit-home" id="mobileEditHomeBtn" style="display:none;">Edit Home Page</button>
+<button class="admin-btn mobile-edit-home" id="mobileEditHomeBtn">Edit Home Page</button>
 <div id="adminLogin">
 <input id="email" placeholder="Email"/>
 <input id="password" type="password" placeholder="Password"/>
@@ -1212,7 +1213,7 @@ function toggleAdmin(){adminPanel.classList.toggle("open");}
 (function(){let taps=0,timer;document.getElementById("logoArea").addEventListener("touchend",e=>{taps++;if(taps===1)timer=setTimeout(()=>{taps=0;},600);if(taps===3){clearTimeout(timer);taps=0;toggleAdmin();}});})();
 
 // Mobile "Edit Home Page" button in admin panel
-document.getElementById("mobileEditHomeBtn").addEventListener("click",()=>{adminPanel.classList.remove("open");toggleHomeEditor();});
+document.getElementById("mobileEditHomeBtn").addEventListener("click",()=>{if(!window.isAdmin)return;adminPanel.classList.remove("open");toggleHomeEditor();});
 
 // Alt+Shift+P = admin, Alt+Shift+M = super admin, Alt+Shift+E = home editor
 document.addEventListener("keydown",e=>{
@@ -1236,7 +1237,7 @@ onAuthStateChanged(auth,user=>{
 window.isAdmin=!!user;document.getElementById("adminTools").style.display=user?"block":"none";
 document.getElementById("adminLogin").style.display=user?"none":"block";
 document.getElementById("adminTitle").textContent=user?"Admin Panel":"Admin Login";
-document.getElementById("mobileEditHomeBtn").style.display=user?"":"none";
+document.getElementById("mobileEditHomeBtn").classList.toggle("visible",!!user);
 document.getElementById("superAdminTools").style.display=user?"block":"none";
 document.getElementById("superAdminMsg").style.display=user?"none":"block";
 if(window.page==="all")renderAll();
