@@ -193,7 +193,10 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 .home-editor textarea{resize:vertical;min-height:60px;line-height:1.5;}
 .home-editor input::placeholder,.home-editor textarea::placeholder{color:var(--text-3);}
 .he-header-btns{display:flex;gap:6px;align-items:center;}
-.he-minimize{display:none;background:none;border:none;color:var(--text-2);font-size:20px;cursor:pointer;padding:2px 6px;line-height:1;}
+.he-close-btn{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-3);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.he-close-btn:hover{color:#fff;background:rgba(255,255,255,0.1);}
+.he-minimize{display:none;background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-3);font-size:16px;cursor:pointer;width:28px;height:28px;border-radius:50%;align-items:center;justify-content:center;flex-shrink:0;}
+.he-minimize:hover{color:#fff;background:rgba(255,255,255,0.1);}
 .he-bubble{display:none;position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent-500),var(--accent-700));color:#fff;font-size:24px;border:none;cursor:pointer;z-index:701;box-shadow:0 4px 20px rgba(168,85,247,0.5);transition:transform .2s;}
 .he-bubble:active{transform:scale(0.9);}
 .he-bubble.visible{display:flex;align-items:center;justify-content:center;}
@@ -254,6 +257,8 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 ::-webkit-scrollbar-thumb{background:rgba(168,85,247,0.25);border-radius:3px;}
 ::-webkit-scrollbar-thumb:hover{background:rgba(168,85,247,0.4);}
 
+.mobile-edit-home{display:none!important;margin-bottom:12px;}
+
 /* Responsive */
 @media(max-width:768px){
 .header-inner{gap:10px;}
@@ -269,9 +274,8 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 .modal-overlay{padding:10px;align-items:flex-end;}
 .admin-panel{width:100%;}
 .home-editor{width:100%;}
-.he-minimize{display:inline-block;}
-.mobile-edit-home.visible{display:block!important;}
-.mobile-edit-home{display:none!important;margin-bottom:12px;}
+.he-minimize{display:flex;}
+.mobile-edit-home.visible{display:block!important;margin-bottom:12px;}
 .rarity-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));max-width:none;}
 .sort-menu{right:auto;left:0;}
 .tb-handle{overflow-x:auto;-webkit-overflow-scrolling:touch;}
@@ -491,7 +495,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 
 <!-- HOME EDITOR PANEL -->
 <div class="home-editor" id="homeEditor">
-<h3>Edit Home Page <span class="he-header-btns"><button class="he-minimize" id="homeEditorMin" title="Minimize">&#x2015;</button><button class="admin-close" id="homeEditorClose">&times;</button></span></h3>
+<h3>Edit Home Page <span class="he-header-btns"><button class="he-minimize" id="homeEditorMin" title="Minimize">&#x2015;</button><button class="he-close-btn" id="homeEditorClose">&times;</button></span></h3>
 <label>Title (use | for line break)</label>
 <input id="heTitle" placeholder="Clicker Sim|Value List">
 <label>Subtitle</label>
