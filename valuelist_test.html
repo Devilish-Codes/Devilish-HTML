@@ -279,7 +279,8 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 .rarity-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));max-width:none;}
 .sort-menu{right:auto;left:0;}
 .tb-handle{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-.text-box{max-width:calc(100vw - 32px);}
+.tb-container{display:none;}
+.he-tb-section{display:none;}
 }
 @media(max-width:480px){
 .pet-grid{grid-template-columns:repeat(2,1fr);gap:8px;}
@@ -509,10 +510,12 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;hei
 <label>Announcement Banner (leave empty to hide)</label>
 <textarea id="heBanner" rows="2" placeholder="Optional announcement text..."></textarea>
 <div class="he-banner-preview" id="heBannerPreview">No banner</div>
+<div class="he-tb-section">
 <hr style="border:0;border-top:1px solid var(--border);margin:16px 0;">
 <label>Text Boxes</label>
 <button class="admin-btn" id="heAddTbBtn" style="margin:6px 0 8px;font-size:12px;padding:8px;">+ Add Text Box</button>
 <div class="he-tb-list" id="heTbList"></div>
+</div>
 <div class="he-actions">
 <button class="admin-btn" id="heSaveBtn">Save</button>
 <button class="admin-btn danger" id="heResetBtn">Reset</button>
