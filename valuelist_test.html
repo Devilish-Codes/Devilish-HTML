@@ -1380,8 +1380,8 @@ body.addEventListener("input",()=>{tb.html=body.innerHTML;});
 let dragging=false,dx=0,dy=0;
 function dragStart(cx,cy,e){if(e&&e.target.closest("button,select,input"))return;dragging=true;const r=el.getBoundingClientRect();dx=cx-r.left;dy=cy-r.top;}
 function dragMove(cx,cy){if(!dragging)return;const cr=tbContainer.getBoundingClientRect();tb.x=Math.max(0,cx-cr.left-dx);tb.y=Math.max(0,cy-cr.top-dy);el.style.left=tb.x+"px";el.style.top=tb.y+"px";}
-handle.addEventListener("mousedown",e=>{dragStart(e.clientX,e.clientY,e);e.preventDefault();});
-handle.addEventListener("touchstart",e=>{const t=e.touches[0];dragStart(t.clientX,t.clientY,e);},{passive:true});
+handle.addEventListener("mousedown",e=>{if(e.target.closest("button,select,input"))return;dragStart(e.clientX,e.clientY,e);e.preventDefault();});
+handle.addEventListener("touchstart",e=>{if(e.target.closest("button,select,input"))return;const t=e.touches[0];dragStart(t.clientX,t.clientY,e);},{passive:true});
 document.addEventListener("mousemove",e=>{dragMove(e.clientX,e.clientY);});
 document.addEventListener("touchmove",e=>{if(!dragging)return;const t=e.touches[0];dragMove(t.clientX,t.clientY);e.preventDefault();},{passive:false});
 document.addEventListener("mouseup",()=>{dragging=false;});
